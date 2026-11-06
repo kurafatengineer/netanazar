@@ -9,9 +9,16 @@ class DB:
         key = key or config.SUPABASE_SERVICE_KEY
         self.c = httpx.Client(
             base_url=f"{url}/rest/v1",
-            headers={"apikey": key, "Authorization": f"Bearer {key}", "Prefer": "return=representation"},
+            headers=self._headers(key),
             timeout=30,
         )
+
+    @staticmethod
+    def _headers(key):
+        h = {"apikey": key, "Prefer": "return=representation"}
+        if key.startswith("eyJ"):  # legacy JWT keys need Bearer; sb_secret_ keys use apikey only
+            h["Authorization"] = f"Bearer {key}"
+        return h
 
     def select(self, table, **params):
         r = self.c.get(f"/{table}", params=params)
