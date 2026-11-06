@@ -1,12 +1,14 @@
 <!doctype html>
 <html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NetaNazar Registry</title><link rel="stylesheet" href="app.css"></head><body><main>
+<title>NetaNazar Registry</title><link rel="stylesheet" href="app.css"><style>.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--line);display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:var(--mut)}.big{width:120px;height:140px;object-fit:cover;border-radius:12px;background:var(--line)}tr.clk{cursor:pointer}tr.clk:hover td{background:var(--line)}.mdl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;overflow:auto;padding:16px}.mdl.open{display:block}.mdlc{max-width:760px;margin:20px auto;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:18px}.pos{padding-left:18px;font-size:14px}.pos li{margin:6px 0}</style></head><body><main>
 <header><h1>NetaNazar</h1><nav><a class="on" href="index.html">Politicians</a><a href="news.html">News</a></nav></header>
 <section class="card" id="setup"></section>
 
 <section class="card"><h2>1. Official member list from sansad.in</h2>
 <p class="mut">One click per house. Our server reads the public member list that sansad.in itself uses (current, sitting members only: name, party, seat, state — no phone numbers or addresses) and updates the database. Safe to repeat any time: it matches the same people again and only changes what changed.</p>
-<div class="row"><button id="lsBtn">⬇ Load Lok Sabha (540)</button><button id="rsBtn">⬇ Load Rajya Sabha (244)</button></div>
+<div class="row"><button id="lsBtn">⬇ Load Lok Sabha (540)</button><button id="rsBtn">⬇ Load Rajya Sabha (244)</button><button id="attBtn" class="ghost">⬇ Attendance (Lok Sabha)</button></div>
+<div class="row" style="margin-top:8px"><button id="posLsBtn" class="ghost">⬇ Positions held · Lok Sabha</button><button id="posRsBtn" class="ghost">⬇ Positions held · Rajya Sabha</button></div>
+<p class="mut" style="margin-top:6px">Photo, party, seat, terms and minister post come with the main load. <b>Attendance</b> takes about half a minute. <b>Positions held</b> (e.g. “Elected to 18th Lok Sabha · June 2024”, committees) needs one request per member, politely spaced, so it takes about 10 minutes per house — you can stop it and continue later.</p>
 <ul id="oSteps"></ul><div id="oLoadMsg" class="msg"></div>
 <details><summary>Backup: paste or upload the list manually</summary>
 <p class="mut">Use this only if the one-click load ever stops working. Open the list on sansad.in, select all, copy, paste here.</p>
@@ -35,6 +37,7 @@
 <section class="card"><div class="row"><h2 style="flex:1;margin:0">4. Results</h2><button id="reload" class="ghost">↻ Reload</button></div>
 <div class="row"><input id="q" type="search" placeholder="Search name, party, seat…" size="30"><label class="mut"><input type="checkbox" id="fm"> show former</label> <select id="hf"><option value="">All houses</option><option>Lok Sabha</option><option>Rajya Sabha</option><option>State Assembly</option></select></div><div id="resState" class="mut"></div><div class="wrap"><table id="tbl"></table></div></section>
 </main>
+<div id="mdl" class="mdl"><div class="mdlc"><button id="mdlClose" class="ghost" style="float:right">✕ Close</button><div id="mdlBody"></div></div></div>
 <script src="app.js"></script>
 <script>
 const {$,esc,api,msg,clear,busy,steps}=NN;
@@ -97,17 +100,37 @@ $('chkBtn').onclick=()=>busy($('chkBtn'),'Reading page…',async()=>{ msg($('chk
  const d=new DOMParser().parseFromString(await r.text(),'text/html'); await runCheck(d.body.innerText||d.body.textContent) }).catch(e=>{ if(e) msg($('chkMsg'),'bad',esc(e.message)) });
 $('pasteBtn').onclick=()=>busy($('pasteBtn'),'Matching…',async()=>{ if(!$('paste').value.trim()){ msg($('chkMsg'),'bad','Paste some text first.'); throw 0 } msg($('chkMsg'),'busy','Matching…'); await runCheck($('paste').value) }).catch(e=>{ if(e) msg($('chkMsg'),'bad',esc(e.message)) });
 
-let PEOPLE=[],GOT={};
+let PEOPLE=[],GOT={},ATT={};
+const pct=(a)=>a&&a.sitting?Math.min(100,Math.round(100*a.signed/a.sitting)):null;
+const avatar=x=>x.photo_url?'<img class="av" loading="lazy" referrerpolicy="no-referrer" src="'+esc(x.photo_url)+'" alt="" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'av ph\',textContent:\''+esc((x.name_en||'?')[0])+'\'}))">':'<span class="av ph">'+esc((x.name_en||'?')[0])+'</span>';
+function attCell(x){ if(x.house!=='Lok Sabha') return '–'; if(x.minister_position) return '<span class="mut" title="Ministers do not sign the attendance register">n/a (minister)</span>'; const a=ATT[x.id]; const v=pct(a); return v==null?'–':v+'%' }
 function drawTable(){ const q=$('q').value.trim().toLowerCase(), hf=$('hf').value;
- const rows=PEOPLE.filter(x=>($('fm').checked||x.is_current!==false)&&(!hf||x.house===hf)&&(!q||[x.name_en,x.party,x.constituency].some(v=>(v||'').toLowerCase().includes(q))));
- const shown=rows.slice(0,200);
- $('tbl').innerHTML=shown.length?'<tr><th>Name<th>Party<th>House<th>Seat'+Object.values(SOURCES).map(s=>'<th>'+s[0]).join('')+'</tr>'+shown.map(x=>'<tr><td>'+esc(x.name_en)+'<td>'+esc(x.party||'')+'<td>'+esc(x.house)+'<td>'+esc(x.constituency||'')+Object.keys(SOURCES).map(k=>'<td>'+({true:'✅',false:'❌'}[GOT[x.id+'|'+k]]||'–')).join('')+'</tr>').join(''):'';
- $('resState').innerHTML=PEOPLE.length?(rows.length+' of '+PEOPLE.length+' politicians'+(rows.length>200?' — showing the first 200, use search to narrow down':'')):'<div class="empty">No politicians yet. Use step 1.</div>' }
+ const rows=PEOPLE.filter(x=>($('fm').checked||x.is_current!==false)&&(!hf||x.house===hf)&&(!q||[x.name_en,x.name_hi,x.party,x.constituency,x.state].some(v=>(v||'').toLowerCase().includes(q))));
+ const shown=rows.slice(0,200); const hasChecks=Object.keys(GOT).length>0;
+ $('tbl').innerHTML=shown.length?'<tr><th><th>Name<th>Party<th>House<th>Seat / State<th>Terms<th>Elected<th>Attendance'+(hasChecks?Object.values(SOURCES).map(s=>'<th>'+s[0]).join(''):'')+'</tr>'+shown.map(x=>'<tr class="clk" data-id="'+x.id+'"><td>'+avatar(x)+'<td><b>'+esc(x.name_en)+'</b>'+(x.minister_position?'<div class="mut">'+esc(x.minister_position)+'</div>':'')+'<td>'+esc(x.party||'')+'<td>'+esc(x.house)+'<td>'+esc(x.constituency||x.state||'')+(x.constituency&&x.state?'<div class="mut">'+esc(x.state)+'</div>':'')+'<td>'+(x.house==='Lok Sabha'&&x.lok_sabha_terms&&x.lok_sabha_terms.length?esc(x.lok_sabha_terms.join(', '))+' <span class="mut">('+x.terms_count+')</span>':(x.terms_count?x.terms_count:'–'))+'<td>'+esc(x.elected_current||x.term_label||'–')+'<td>'+attCell(x)+(hasChecks?Object.keys(SOURCES).map(k=>'<td>'+({true:'✅',false:'❌'}[GOT[x.id+'|'+k]]||'–')).join(''):'')+'</tr>').join(''):'';
+ $('resState').innerHTML=PEOPLE.length?(rows.length+' of '+PEOPLE.length+' politicians'+(rows.length>200?' — showing the first 200, use search to narrow down':'')+' · click a row for details'):'<div class="empty">No politicians yet. Use step 1.</div>' }
 async function loadResults(){ $('resState').innerHTML='<span class="spin"></span> Loading…';
- try{ const [{rows:p},{rows:c}]=await Promise.all([api('registry','GET','?action=politicians'),api('registry','GET','?action=checks')]);
-  GOT={}; c.forEach(x=>GOT[x.politician_id+'|'+x.source]=x.found); PEOPLE=p; drawTable();
+ try{ const [{rows:p},{rows:c},{rows:at}]=await Promise.all([api('registry','GET','?action=politicians'),api('registry','GET','?action=checks'),api('registry','GET','?action=attendance')]);
+  GOT={}; c.forEach(x=>GOT[x.politician_id+'|'+x.source]=x.found); ATT={}; at.forEach(x=>{const o=ATT[x.politician_id]||(ATT[x.politician_id]={signed:0,sitting:0}); o.signed+=Math.min(x.signed_days||0,x.sitting_days||0); o.sitting+=x.sitting_days||0}); PEOPLE=p; drawTable();
  }catch(e){ $('tbl').innerHTML=''; $('resState').innerHTML='<span class="chip bad">✗ '+esc(e.message)+'</span>' }}
 $('q').oninput=drawTable; $('fm').onchange=drawTable; $('hf').onchange=drawTable;
+
+// ---- member detail window ----
+$('tbl').onclick=async e=>{ const tr=e.target.closest('tr.clk'); if(!tr) return; const box=$('mdlBody'); $('mdl').classList.add('open'); box.innerHTML='<p><span class="spin"></span> Loading…</p>';
+ try{ const {member:m,attendance:att}=await api('registry','GET','?action=member&id='+tr.dataset.id);
+  const rows=(att||[]).map(a=>{const p=a.sitting_days?Math.min(100,Math.round(100*Math.min(a.signed_days,a.sitting_days)/a.sitting_days)):null; return '<tr><td>Session '+a.session_no+'<td>'+esc(a.session_period||'')+'<td>'+(m.minister_position?'n/a':a.signed_days+' / '+a.sitting_days)+'<td>'+(m.minister_position||p==null?'–':p+'%')+'</tr>'}).join('');
+  const pos=(m.positions_held||[]).map(x=>'<li><span class="mut">'+esc(x.period)+'</span> — '+esc(x.text)+'</li>').join('');
+  box.innerHTML='<div class="row" style="align-items:flex-start;gap:16px">'+(m.photo_url?'<img class="big" referrerpolicy="no-referrer" src="'+esc(m.photo_url)+'" alt="">':'')+'<div><h2 style="margin:0">'+esc(m.name_en)+'</h2>'+(m.name_hi?'<div class="mut">'+esc(m.name_hi)+'</div>':'')+
+   '<p style="margin:6px 0"><span class="chip">'+esc(m.party||'—')+'</span> <span class="chip">'+esc(m.house)+'</span>'+(m.is_current===false?' <span class="chip bad">former</span>':'')+(m.minister_position?' <span class="chip ok">'+esc(m.minister_position)+'</span>':'')+'</p>'+
+   '<div>'+(m.constituency?'Constituency: <b>'+esc(m.constituency)+'</b> · ':'')+(m.state?'State: <b>'+esc(m.state)+'</b>':'')+'</div>'+
+   (m.lok_sabha_terms&&m.lok_sabha_terms.length?'<div>Lok Sabha terms: <b>'+esc(m.lok_sabha_terms.join(', '))+'</b> ('+m.terms_count+' term'+(m.terms_count==1?'':'s')+')</div>':(m.terms_count?'<div>Terms: <b>'+m.terms_count+'</b></div>':''))+
+   (m.term_label?'<div>Current: <b>'+esc(m.term_label)+'</b>'+(m.term_start?' · from '+esc(m.term_start):'')+(m.term_end?' until '+esc(m.term_end):'')+'</div>':'')+(m.elected_current?'<div>Elected: <b>'+esc(m.elected_current)+'</b></div>':'')+
+   (m.gender?'<div class="mut">'+esc(m.gender)+'</div>':'')+'</div></div>'+
+   (rows?'<h3>Attendance (current Lok Sabha)</h3>'+(m.minister_position?'<p class="mut">Ministers are not required to sign the attendance register, so no attendance is shown.</p>':'')+'<div class="wrap"><table><tr><th>Session<th>Period<th>Days signed<th>%</tr>'+rows+'</table></div>':(m.house==='Lok Sabha'?'<p class="mut">No attendance loaded yet — use “Attendance (Lok Sabha)”.</p>':''))+
+   (pos?'<h3>Positions held</h3><ul class="pos">'+pos+'</ul>':'<p class="mut">Positions held not loaded yet'+(m.details_fetched_at?'':' — use “Positions held” in step 1')+'.</p>')
+ }catch(err){ box.innerHTML='<span class="chip bad">✗ '+esc(err.message)+'</span>' } };
+$('mdlClose').onclick=()=>$('mdl').classList.remove('open'); $('mdl').onclick=e=>{ if(e.target.id==='mdl') $('mdl').classList.remove('open') };
+document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('mdl').classList.remove('open') });
 $('reload').onclick=loadResults;
 
 // ---------- official list import ----------
@@ -162,6 +185,21 @@ async function loadOfficial(house,btn){ const S=steps($('oSteps')); S.add('f','R
  }catch(e){ S.set('f','bad','Could not read the list'); msg($('oLoadMsg'),'bad',esc(e.message)); throw e } }
 $('lsBtn').onclick=()=>busy($('lsBtn'),'Loading…',()=>loadOfficial('Lok Sabha')).catch(()=>{});
 $('rsBtn').onclick=()=>busy($('rsBtn'),'Loading…',()=>loadOfficial('Rajya Sabha')).catch(()=>{});
+
+// ---------- attendance + positions ----------
+$('attBtn').onclick=()=>busy($('attBtn'),'Loading…',async()=>{ const S=steps($('oSteps')); S.add('a','Reading attendance for every session of the 18th Lok Sabha'); S.set('a','busy'); clear($('oLoadMsg'));
+ let r; try{ r=await api('registry','POST','',{action:'official_attendance'}) }catch(e){ S.set('a','busy','Retrying once…'); r=await api('registry','POST','',{action:'official_attendance'}) }
+ S.set('a','ok','Attendance saved: '+r.sessions+' sessions, '+r.rows+' member records'); msg($('oLoadMsg'),'ok','Attendance is up to date.'); loadResults() }).catch(e=>{ if(e) msg($('oLoadMsg'),'bad',esc(e.message)) });
+let STOPPOS=false;
+async function loadPositions(house,btn){ const S=steps($('oSteps')); S.add('p','Positions held — '+house); S.set('p','busy'); clear($('oLoadMsg')); STOPPOS=false; let off=0,total=0,done=0,failed=0;
+ const stop=document.createElement('button'); stop.className='ghost'; stop.textContent='■ Stop'; stop.onclick=()=>{STOPPOS=true;stop.textContent='Stopping…'}; btn.parentNode.appendChild(stop);
+ try{ while(!STOPPOS){ const r=await api('registry','POST','',{action:'official_details',house,offset:off,limit:40}); total=r.total; done+=r.done; failed+=r.failed; off=r.next_offset;
+   S.set('p','busy','Positions held — '+house+': '+Math.min(off,total)+' of '+total+(failed?' ('+failed+' failed)':'')); if(r.finished) break }
+  S.set('p',off>=total?'ok':'busy','Positions held — '+house+': '+done+' members saved'+(off<total?' — stopped at '+off+' of '+total+'; press the button again to continue from the start of the list (already saved ones are refreshed)':'')+(failed?' · '+failed+' failed':''));
+  msg($('oLoadMsg'),off>=total?'ok':'busy',off>=total?'Positions held loaded for '+house+'.':'Stopped.'); loadResults();
+ }finally{ stop.remove() } }
+$('posLsBtn').onclick=()=>busy($('posLsBtn'),'Loading…',()=>loadPositions('Lok Sabha',$('posLsBtn'))).catch(e=>{ if(e) msg($('oLoadMsg'),'bad',esc(e.message)) });
+$('posRsBtn').onclick=()=>busy($('posRsBtn'),'Loading…',()=>loadPositions('Rajya Sabha',$('posRsBtn'))).catch(e=>{ if(e) msg($('oLoadMsg'),'bad',esc(e.message)) });
 
 NN.setup({onReady:loadResults});
 </script></body></html>

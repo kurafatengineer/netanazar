@@ -53,14 +53,80 @@ async function officialRows(house: string) {
     const list: any[] = en.membersDtoList ?? [];
     if (list.length < 400 || list.length !== en.metaDatasDto?.totalElements) throw new Error(`Unexpected Lok Sabha list size (${list.length}); nothing imported`);
     const hiBy = new Map((hi.membersDtoList ?? []).map((m: any) => [m.mpsno, tidy(m.mpFirstLastName)]));
+    const mins = await ministerMap('LS');
     return list.map((m) => ({ official_id: `LS:${m.mpsno}`, name: tidy(m.mpFirstLastName), rawName: tidy(m.mpLastFirstName), name_hi: hiBy.get(m.mpsno) || undefined,
-      party: tidy(m.partySname), constituency: tidy(m.constName), state: tidy(m.stateName), status: 'SITTING' }));
+      party: tidy(m.partySname), constituency: tidy(m.constName), state: tidy(m.stateName), status: 'SITTING',
+      photo_url: m.imageUrl || undefined, gender: tidy(m.gender) || undefined, terms_count: m.noOfTerms ?? undefined,
+      lok_sabha_terms: String(m.lsExpr ?? '').split(',').map((x) => parseInt(x, 10)).filter((x) => x > 0),
+      term_label: m.lastLoksabha ? `${m.lastLoksabha}th Lok Sabha` : undefined, minister_position: mins.get(String(m.mpsno)) }));
   }
   const rs = await getJson('https://sansad.in/api_rs/member/sitting-members?mpFlag=1&page=1&size=400&locale=en');
   const list: any[] = rs.records ?? [];
   if (list.length < 200 || list.length !== rs._metadata?.totalElements) throw new Error(`Unexpected Rajya Sabha list size (${list.length}); nothing imported`);
+  const mins = await ministerMap('RS');
   return list.map((m) => ({ official_id: `RS:${m.mpsno}`, name: cleanEn(m.name), rawName: tidy(m.name), name_hi: cleanHi(m.hname) || undefined,
-    party: tidy(m.partyCode), constituency: '', state: tidy(m.state), status: 'SITTING' }));
+    party: tidy(m.partyCode), constituency: '', state: tidy(m.state), status: 'SITTING',
+    photo_url: m.imageUrl || undefined, gender: tidy(m.gender) || undefined, terms_count: m.termCount ?? undefined,
+    term_label: tidy(m.term) || undefined, term_start: isoDate(m.notificationDate), term_end: isoDate(m.expirationDate),
+    minister_position: mins.get(String(m.mpsno)) }));
+}
+
+
+const isoDate = (d: unknown) => { const m = String(d ?? '').match(/^(\d{2})\/(\d{2})\/(\d{4})$/); return m ? `${m[3]}-${m[2]}-${m[1]}` : undefined; };
+// Current ministers (public): mpsno -> position, per house
+async function ministerMap(house: 'LS' | 'RS') {
+  const out = new Map<string, string>();
+  try {
+    await sleep(1000);
+    const list = await getJson('https://sansad.in/api_ls/member/getInCouncilOfMinisters');
+    for (const m of Array.isArray(list) ? list : []) if (m.house === house && m.mpsno) out.set(String(m.mpsno), tidy(m.position));
+  } catch { /* optional */ }
+  return out;
+}
+const stripHtml = (s: unknown) => String(s ?? '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+
+// Attendance for the current Lok Sabha: one request per session (all members at once)
+async function officialAttendance() {
+  const sess = await getJson('https://sansad.in/api_ls/business/getAllLoksabhaAndSession');
+  const ls = (Array.isArray(sess) ? sess : []).find((x: any) => x.loksabha === 18);
+  if (!ls) throw new Error('Lok Sabha 18 sessions not found');
+  const pols = (await all('politicians', 'id,official_id')).filter((p) => String(p.official_id ?? '').startsWith('LS:'));
+  if (!pols.length) throw new Error('Load the Lok Sabha member list first');
+  const byMps = new Map(pols.map((p) => [String(p.official_id).slice(3), p.id]));
+  const rowMap = new Map<string, any>(); let sessions = 0;
+  for (const s of ls.sessions ?? []) {
+    await sleep(1200);
+    const mem = await getJson(`https://sansad.in/api_ls/member/getMemberAttendanceMemberWise?loksabha=18&session=${s.sessionNo}`);
+    if (!Array.isArray(mem) || !mem.length) continue; sessions++;
+    const total = (s.dates ?? []).length; const period = (s.sessionPeriod ?? [])[0] ?? null;
+    for (const m of mem) { const pid = byMps.get(String(m.mpsno)); if (pid) rowMap.set(`${pid}|${s.sessionNo}`, { politician_id: pid, house: 'Lok Sabha', loksabha: 18, session_no: s.sessionNo, session_period: period, sitting_days: total, signed_days: m.signedDaysCount ?? 0, fetched_at: new Date().toISOString() }); }
+  }
+  const rows = [...rowMap.values()];
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error } = await db.from('attendance').upsert(rows.slice(i, i + 500), { onConflict: 'politician_id,loksabha,session_no' }); if (error) throw new Error(error.message);
+  }
+  return { sessions, rows: rows.length };
+}
+
+// Positions held ("Elected to 18th Lok Sabha", committees, ministries…), one request per member, in small batches
+async function officialDetails(house: string, offset: number, limit: number) {
+  const prefix = house === 'Lok Sabha' ? 'LS:' : 'RS:';
+  const pols = (await all('politicians', 'id,official_id')).filter((p) => String(p.official_id ?? '').startsWith(prefix));
+  const slice = pols.slice(offset, offset + limit); let done = 0, failed = 0;
+  for (const p of slice) {
+    const code = String(p.official_id).slice(3);
+    const url = house === 'Lok Sabha' ? `https://sansad.in/api_ls/member/positionHeld?mpCode=${code}&locale=en` : `https://sansad.in/api_rs/member/position-held?mpCode=${code}&locale=en`;
+    try {
+      const data = await getJson(url);
+      const positions = (Array.isArray(data) ? data : []).map((x: any) => ({ period: tidy(x.period), text: stripHtml(x.positionHeld ?? x.position).slice(0, 300) })).filter((x: any) => x.text).slice(0, 25);
+      const el = positions.find((x: any) => /elected to (the )?18th lok sabha/i.test(x.text)) ?? positions.find((x: any) => /elected to/i.test(x.text));
+      await db.from('politicians').update({ positions_held: positions, elected_current: el ? `${el.text.replace(/^elected to /i, '')} · ${el.period}` : null, details_fetched_at: new Date().toISOString() }).eq('id', p.id);
+      done++;
+    } catch { failed++; }
+    await sleep(700);
+  }
+  const next = offset + slice.length;
+  return { house, total: pols.length, offset, done, failed, next_offset: next, finished: next >= pols.length };
 }
 
 async function importOfficial(house: string, rows: any[], markStale: boolean) {
@@ -85,6 +151,7 @@ async function importOfficial(house: string, rows: any[], markStale: boolean) {
       cur = c.length === 1 ? c[0] : undefined; m = 'seat';
     }
     const v: Record<string, unknown> = { name_en: name, house, source: 'official', is_current: true, imported_at: new Date().toISOString() };
+    for (const k of ['photo_url','gender','terms_count','lok_sabha_terms','term_label','term_start','term_end','minister_position']) if (r[k] !== undefined && r[k] !== null && r[k] !== '') v[k] = r[k];
     if (r.official_id) v.official_id = r.official_id; if (r.name_hi) v.name_hi = r.name_hi; if (r.party) v.party = r.party; if (r.constituency) v.constituency = r.constituency; if (r.state) v.state = r.state; if (r.status) v.official_status = r.status;
     if (cur && !used.has(cur.id)) {
       used.add(cur.id); how[m]++;
@@ -118,7 +185,14 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (req.method === 'GET') {
       const action = url.searchParams.get('action');
-      if (action === 'politicians') return json({ rows: await all('politicians', 'id,name_en,name_hi,party,house,constituency,state,wikidata_id,is_current,source') });
+      if (action === 'politicians') return json({ rows: await all('politicians', 'id,name_en,name_hi,party,house,constituency,state,wikidata_id,is_current,source,photo_url,gender,terms_count,lok_sabha_terms,term_label,term_start,term_end,minister_position,elected_current,official_id,details_fetched_at') });
+      if (action === 'attendance') return json({ rows: await all('attendance', 'id,politician_id,session_no,session_period,sitting_days,signed_days,loksabha') });
+      if (action === 'member') {
+        const id = url.searchParams.get('id')!;
+        const { data } = await db.from('politicians').select('id,name_en,name_hi,party,house,constituency,state,photo_url,gender,terms_count,lok_sabha_terms,term_label,term_start,term_end,minister_position,elected_current,positions_held,details_fetched_at,is_current').eq('id', id).single();
+        const { data: att } = await db.from('attendance').select('session_no,session_period,sitting_days,signed_days,loksabha').eq('politician_id', id).order('session_no');
+        return json({ member: data, attendance: att ?? [] });
+      }
       if (action === 'checks') return json({ rows: await all('registry_checks', 'id,politician_id,source,found') });
       return json({ error: 'unknown action' }, 400);
     }
@@ -146,6 +220,11 @@ Deno.serve(async (req) => {
       if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
       const rows = await officialRows(body.house);
       return json({ source: 'sansad.in', ...(await importOfficial(body.house, rows, body.mark_stale !== false)) });
+    }
+    if (body.action === 'official_attendance') return json(await officialAttendance());
+    if (body.action === 'official_details') {
+      if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
+      return json(await officialDetails(body.house, Math.max(0, +body.offset || 0), Math.min(+body.limit || 60, 80)));
     }
     if (body.action === 'official') {
       if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
