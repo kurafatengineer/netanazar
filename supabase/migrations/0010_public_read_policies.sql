@@ -24,3 +24,13 @@ drop policy if exists "public read articles" on public.articles;
 create policy "public read articles" on public.articles for select to anon using (status <> 'irrelevant');
 drop policy if exists "public read sources" on public.sources;
 create policy "public read sources" on public.sources for select to anon using (true);
+
+-- Change history of articles (what changed and when), without the article text itself.
+alter table public.article_versions add column if not exists added_lines int;
+alter table public.article_versions add column if not exists removed_lines int;
+grant select (article_id, version_no, title, captured_at, added_lines, removed_lines) on public.article_versions to anon;
+drop policy if exists "public read article changes" on public.article_versions;
+create policy "public read article changes" on public.article_versions for select to anon using (true);
+create or replace view public.v_article_changes with (security_invoker = true) as
+  select article_id, version_no, title, captured_at, added_lines, removed_lines from public.article_versions;
+grant select on public.v_article_changes to anon;
