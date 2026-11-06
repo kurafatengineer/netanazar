@@ -4,8 +4,12 @@
 <header><h1>NetaNazar</h1><nav><a class="on" href="index.html">Politicians</a><a href="news.html">News</a></nav></header>
 <section class="card" id="setup"></section>
 
-<section class="card"><h2>1. Official member list (recommended)</h2>
-<p class="mut">Most reliable source. Open the Lok Sabha / Rajya Sabha members list on <b>sansad.in</b> in another tab (Members → List of Members → Current Lok Sabha), let it load, select all, copy, and paste here.</p>
+<section class="card"><h2>1. Official member list from sansad.in</h2>
+<p class="mut">One click per house. Our server reads the public member list that sansad.in itself uses (current, sitting members only: name, party, seat, state — no phone numbers or addresses) and updates the database. Safe to repeat any time: it matches the same people again and only changes what changed.</p>
+<div class="row"><button id="lsBtn">⬇ Load Lok Sabha (540)</button><button id="rsBtn">⬇ Load Rajya Sabha (244)</button></div>
+<ul id="oSteps"></ul><div id="oLoadMsg" class="msg"></div>
+<details><summary>Backup: paste or upload the list manually</summary>
+<p class="mut">Use this only if the one-click load ever stops working. Open the list on sansad.in, select all, copy, paste here.</p>
 <div class="row"><select id="oh"><option>Lok Sabha</option><option>Rajya Sabha</option></select>
 <a href="https://sansad.in/ls/members" target="_blank" rel="noopener">Open Lok Sabha list ↗</a><a href="https://sansad.in/rs/members" target="_blank" rel="noopener">Open Rajya Sabha list ↗</a>
 <label class="mut"><input type="file" id="ofile" accept=".csv,.txt" style="display:none"><span class="chip" style="cursor:pointer" onclick="document.getElementById('ofile').click()">or upload CSV</span></label></div>
@@ -15,9 +19,9 @@
 <label class="mut"><input type="checkbox" id="oSit" checked> Only members marked SITTING (ignore former)</label><br>
 <label class="mut"><input type="checkbox" id="oStale" checked> Mark people already in my list but missing from this official list as “former”</label>
 <p><button id="oBtn">⬆ Import official list</button></p></div>
-<div id="oMsg" class="msg"></div></section>
+<div id="oMsg" class="msg"></div></details></section>
 
-<section class="card"><h2>2. Extra details from Wikidata (optional)</h2>
+<section class="card"><h2>2. State assemblies and extra details from Wikidata (optional)</h2>
 <p class="mut">Your browser asks Wikidata directly and saves the list of MPs / MLAs with party and seat.</p>
 <button id="wdBtn">⬇ Fetch from Wikidata</button><ul id="wdSteps"></ul><div id="wdMsg" class="msg"></div></section>
 
@@ -145,6 +149,19 @@ $('oBtn').onclick=()=>busy($('oBtn'),'Importing…',async()=>{ const rows=buildO
  const r=await api('registry','POST','',{action:'official',house:$('oh').value,rows,mark_stale:$('oStale').checked});
  msg($('oMsg'),'ok','Imported <b>'+r.official_rows+'</b> '+esc(r.house)+' members. Matched existing: <b>'+r.matched+'</b> (by name '+r.matched_by.exact+', loose name '+r.matched_by.loose+', seat '+r.matched_by.seat+'). New: <b>'+r.inserted+'</b>. Marked former: <b>'+r.marked_former+'</b>'+(r.former_examples.length?' (e.g. '+esc(r.former_examples.join(', '))+')':'')+'.');
  loadResults() }).catch(e=>{ if(e) msg($('oMsg'),'bad',esc(e.message)) });
+
+
+// ---------- one-click official load ----------
+async function loadOfficial(house,btn){ const S=steps($('oSteps')); S.add('f','Reading the '+house+' list from sansad.in'); S.add('m','Matching with our database'); clear($('oLoadMsg'));
+ try{ S.set('f','busy'); S.set('m','wait');
+  const r=await api('registry','POST','',{action:'official_fetch',house,mark_stale:true});
+  S.set('f','ok','Read '+r.official_rows+' sitting '+esc(house)+' members from sansad.in');
+  S.set('m','ok','Matched '+r.matched+' existing · added '+r.inserted+' new · marked '+r.marked_former+' older entries as former');
+  msg($('oLoadMsg'),'ok','<b>'+esc(house)+'</b> is up to date: '+r.official_rows+' current members.'+(r.former_examples&&r.former_examples.length?' Marked former, e.g. '+esc(r.former_examples.slice(0,4).join(', '))+'.':''));
+  loadResults();
+ }catch(e){ S.set('f','bad','Could not read the list'); msg($('oLoadMsg'),'bad',esc(e.message)); throw e } }
+$('lsBtn').onclick=()=>busy($('lsBtn'),'Loading…',()=>loadOfficial('Lok Sabha')).catch(()=>{});
+$('rsBtn').onclick=()=>busy($('rsBtn'),'Loading…',()=>loadOfficial('Rajya Sabha')).catch(()=>{});
 
 NN.setup({onReady:loadResults});
 </script></body></html>

@@ -26,33 +26,73 @@ const keyAll = (s: string) => toks(s).sort().join(' ');
 const keyLoose = (s: string) => { const t = toks(s).filter((x) => x.length > 1).sort(); return t.length >= 2 ? t.join(' ') : ''; };
 const seatKey = (s: string) => norm((s || '').replace(/\((sc|st)\)/ig, ' ').replace(/lok sabha constituency|assembly constituency|constituency/ig, ' '));
 
+
+const UA = 'NetaNazarBot/1.0 (+contact: projectnetanazar@gmail.com)';
+const HON_RE = /^(shri|smt|sri|dr|prof|adv|kumari|kum|sh|shrimati|sushri|capt|col|lt|gen|maj|er|ms|mr|mrs|late)\.?$/i;
+const HON_HI = new Set(['श्री', 'श्रीमती', 'सुश्री', 'डा.', 'डा', 'डॉ.', 'डॉ', 'प्रो.', 'प्रो', 'कुमारी', 'सर्वश्री', 'श्रीमति']);
+const swapName = (raw: string, isHon: (w: string) => boolean) => {
+  const parts = String(raw ?? '').replace(/\s+/g, ' ').trim().split(',').map((x) => x.trim()).filter(Boolean);
+  const strip = (t: string) => t.split(' ').filter((w) => w && !isHon(w)).join(' ').trim();
+  return parts.length >= 2 ? (strip(parts.slice(1).join(' ')) + ' ' + strip(parts[0])).trim() : strip(parts[0] ?? '');
+};
+const cleanEn = (raw: string) => swapName(raw, (w) => HON_RE.test(w));
+const cleanHi = (raw: string) => swapName(raw, (w) => HON_HI.has(w));
+const tidy = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+async function getJson(url: string) {
+  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`sansad.in answered ${r.status}`);
+  return await r.json();
+}
+// Public member lists from sansad.in (the same data its own pages show). Only public role details are kept.
+async function officialRows(house: string) {
+  if (house === 'Lok Sabha') {
+    const en = await getJson('https://sansad.in/api_ls/member?loksabha=18&sitting=1&locale=en&page=1&size=700');
+    await sleep(1500);
+    const hi = await getJson('https://sansad.in/api_ls/member?loksabha=18&sitting=1&locale=hi&page=1&size=700');
+    const list: any[] = en.membersDtoList ?? [];
+    if (list.length < 400 || list.length !== en.metaDatasDto?.totalElements) throw new Error(`Unexpected Lok Sabha list size (${list.length}); nothing imported`);
+    const hiBy = new Map((hi.membersDtoList ?? []).map((m: any) => [m.mpsno, tidy(m.mpFirstLastName)]));
+    return list.map((m) => ({ official_id: `LS:${m.mpsno}`, name: tidy(m.mpFirstLastName), rawName: tidy(m.mpLastFirstName), name_hi: hiBy.get(m.mpsno) || undefined,
+      party: tidy(m.partySname), constituency: tidy(m.constName), state: tidy(m.stateName), status: 'SITTING' }));
+  }
+  const rs = await getJson('https://sansad.in/api_rs/member/sitting-members?mpFlag=1&page=1&size=400&locale=en');
+  const list: any[] = rs.records ?? [];
+  if (list.length < 200 || list.length !== rs._metadata?.totalElements) throw new Error(`Unexpected Rajya Sabha list size (${list.length}); nothing imported`);
+  return list.map((m) => ({ official_id: `RS:${m.mpsno}`, name: cleanEn(m.name), rawName: tidy(m.name), name_hi: cleanHi(m.hname) || undefined,
+    party: tidy(m.partyCode), constituency: '', state: tidy(m.state), status: 'SITTING' }));
+}
+
 async function importOfficial(house: string, rows: any[], markStale: boolean) {
-  const existing = (await all('politicians', 'id,name_en,name_variants,house,constituency,state,source,is_current')).filter((p) => p.house === house);
-  const exact = new Map<string, any>(), loose = new Map<string, any>(), seat = new Map<string, any[]>();
+  const existing = (await all('politicians', 'id,name_en,name_hi,name_variants,house,constituency,state,source,is_current,official_id')).filter((p) => p.house === house);
+  const exact = new Map<string, any>(), loose = new Map<string, any>(), seat = new Map<string, any[]>(), byId = new Map<string, any>();
   for (const p of existing) {
+    if (p.official_id) byId.set(p.official_id, p);
     for (const n of [p.name_en, ...(p.name_variants ?? [])].filter(Boolean)) {
       exact.set(keyAll(n), p); const kl = keyLoose(n); if (kl) loose.set(kl, p);
     }
     if (p.constituency) { const k = seatKey(p.constituency); if (k) seat.set(k, [...(seat.get(k) ?? []), p]); }
   }
   const used = new Set<string>(); const updates: { id: string; v: Record<string, unknown> }[] = []; const fresh: Record<string, unknown>[] = [];
-  const how = { exact: 0, loose: 0, seat: 0 };
+  const how = { id: 0, exact: 0, loose: 0, seat: 0 };
   for (const r of rows) {
     const name = String(r.name ?? '').trim(); if (!name) continue;
-    let cur = exact.get(keyAll(name)); let m: 'exact' | 'loose' | 'seat' = 'exact';
+    let cur = r.official_id ? byId.get(r.official_id) : undefined; let m: 'id' | 'exact' | 'loose' | 'seat' = 'id';
+    if (!cur || used.has(cur.id)) { cur = exact.get(keyAll(name)); m = 'exact'; }
     if (!cur || used.has(cur.id)) { cur = loose.get(keyLoose(name)); m = 'loose'; }
     if ((!cur || used.has(cur.id)) && r.constituency) {
-      const c = (seat.get(seatKey(r.constituency)) ?? []).filter((p) => !used.has(p.id) && (!p.state || !r.state || norm(p.state) === norm(r.state)));
+      const c = (seat.get(seatKey(r.constituency)) ?? []).filter((p) => !used.has(p.id));
       cur = c.length === 1 ? c[0] : undefined; m = 'seat';
     }
     const v: Record<string, unknown> = { name_en: name, house, source: 'official', is_current: true, imported_at: new Date().toISOString() };
-    if (r.party) v.party = r.party; if (r.constituency) v.constituency = r.constituency; if (r.state) v.state = r.state; if (r.status) v.official_status = r.status;
+    if (r.official_id) v.official_id = r.official_id; if (r.name_hi) v.name_hi = r.name_hi; if (r.party) v.party = r.party; if (r.constituency) v.constituency = r.constituency; if (r.state) v.state = r.state; if (r.status) v.official_status = r.status;
     if (cur && !used.has(cur.id)) {
       used.add(cur.id); how[m]++;
       const variants = new Set<string>([...(cur.name_variants ?? [])]); if (cur.name_en && norm(cur.name_en) !== norm(name)) variants.add(cur.name_en);
       if (r.rawName && norm(r.rawName) !== norm(name)) variants.add(String(r.rawName));
+      if (cur.name_hi && r.name_hi && norm(cur.name_hi) !== norm(r.name_hi)) variants.add(cur.name_hi);
       v.name_variants = [...variants]; updates.push({ id: cur.id, v });
-    } else { if (r.rawName && norm(r.rawName) !== norm(name)) v.name_variants = [String(r.rawName)]; fresh.push(v); }
+    } else { v.name_variants = r.rawName && norm(r.rawName) !== norm(name) ? [String(r.rawName)] : []; fresh.push(v); }
   }
   for (let i = 0; i < updates.length; i += 20) {
     await Promise.all(updates.slice(i, i + 20).map((u) => db.from('politicians').update(u.v).eq('id', u.id)));
@@ -101,6 +141,11 @@ Deno.serve(async (req) => {
         if (error) return json({ error: error.message }, 500);
       }
       return json({ inserted: fresh.length, updated });
+    }
+    if (body.action === 'official_fetch') {
+      if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
+      const rows = await officialRows(body.house);
+      return json({ source: 'sansad.in', ...(await importOfficial(body.house, rows, body.mark_stale !== false)) });
     }
     if (body.action === 'official') {
       if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
