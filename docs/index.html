@@ -26,9 +26,13 @@ eci:['ECI','https://results.eci.gov.in/'],myneta:['MyNeta','https://www.myneta.i
 for(const [k,[n]] of Object.entries(SOURCES)) $('src').add(new Option(n,k));
 $('src').onchange=()=>$('u').value=SOURCES[$('src').value][1]; $('u').value=SOURCES.loksabha[1];
 
-const HOUSES=[{house:'Lok Sabha',search:'member of the 18th Lok Sabha',ok:l=>/18th lok sabha/.test(l)},
- {house:'Rajya Sabha',search:'member of the Rajya Sabha',ok:l=>/^member of (the )?rajya sabha/.test(l)},
- {house:'State Assembly',search:'member of the Delhi Legislative Assembly',ok:l=>/delhi/.test(l)&&/member/.test(l)}];
+const ord=l=>{const m=l.match(/(\d+)(st|nd|rd|th)/);return m?+m[1]:0};
+const latest=arr=>{const mx=Math.max(0,...arr.map(x=>ord(x.l)));return mx?arr.filter(x=>ord(x.l)===mx):arr};
+const HOUSES=[
+ {house:'Lok Sabha',search:'member of the 18th Lok Sabha',ok:l=>/18th lok sabha/.test(l),
+  extra:{pos:'member of the Lok Sabha',posOk:l=>/^member of (the )?lok sabha$/.test(l),term:'18th Lok Sabha',termOk:l=>/^18th lok sabha$/.test(l)}},
+ {house:'Rajya Sabha',search:'Rajya Sabha',ok:l=>/member/.test(l)&&/rajya sabha/.test(l)&&!/\d(st|nd|rd|th)/.test(l)},
+ {house:'State Assembly (Delhi)',dbHouse:'State Assembly',search:'Delhi Legislative Assembly',ok:l=>/member/.test(l)&&/delhi/.test(l),pick:latest}];
 const sparql=async q=>{let r; try{r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q))}catch{throw new Error('Wikidata could not be reached from this browser')}
  if(!r.ok){ const t=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,220); throw new Error('Wikidata answered '+r.status+(t?' — '+t:'')) } return (await r.json()).results.bindings};
 const findPositions=async term=>{ let r; try{r=await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&type=item&limit=30&language=en&format=json&origin=*&search='+encodeURIComponent(term))}catch{throw new Error('Wikidata search could not be reached from this browser')}
@@ -38,16 +42,22 @@ async function wikidata(){ const S=steps($('wdSteps')); HOUSES.forEach(h=>S.add(
  let all=[];
  try{
   for(const H of HOUSES){ S.set(H.house,'busy',H.house+' — searching Wikidata…');
-   const pos=await findPositions(H.search);
-   const found=pos.filter(x=>H.ok(x.l.toLowerCase()));
-   if(!found.length){ S.set(H.house,'bad',H.house+' — no matching position found on Wikidata (searched: “'+esc(H.search)+'”; Wikidata returned '+(pos.length?pos.map(x=>esc(x.l)).join(' | '):'nothing')+')'); continue }
-   S.set(H.house,'busy',H.house+' — loading people… ('+found.length+' position item'+(found.length>1?'s':'')+')');
-   const rows=await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${found.map(x=>'wd:'+x.q).join(' ')}}
-    ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end}
-    ?p rdfs:label ?en FILTER(LANG(?en)="en") OPTIONAL{?p rdfs:label ?hi FILTER(LANG(?hi)="hi")}
+   let pos=await findPositions(H.search); let found=pos.filter(x=>H.ok(x.l.toLowerCase())); if(H.pick) found=H.pick(found);
+   let extraQ=null;
+   if(H.extra){ const [gp,tm]=await Promise.all([findPositions(H.extra.pos),findPositions(H.extra.term)]);
+     const g=gp.filter(x=>H.extra.posOk(x.l.toLowerCase())), t=tm.filter(x=>H.extra.termOk(x.l.toLowerCase())); if(g.length&&t.length) extraQ={g,t} }
+   if(!found.length&&!extraQ){ S.set(H.house,'bad',H.house+' — no matching position found on Wikidata (searched: “'+esc(H.search)+'”; Wikidata returned '+(pos.length?pos.map(x=>esc(x.l)).join(' | '):'nothing')+')'); continue }
+   S.set(H.house,'busy',H.house+' — loading people… ('+found.length+' position item'+(found.length==1?'':'s')+(extraQ?' + term list':'')+')');
+   const sel=`?p rdfs:label ?en FILTER(LANG(?en)="en") OPTIONAL{?p rdfs:label ?hi FILTER(LANG(?hi)="hi")}
     OPTIONAL{?p wdt:P102 ?party . ?party rdfs:label ?partyL FILTER(LANG(?partyL)="en")}
-    OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}}`);
-   for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house:H.house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value});
+    OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}`;
+   let rows=[];
+   if(found.length) rows=rows.concat(await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${found.map(x=>'wd:'+x.q).join(' ')}}
+     ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end} ${sel}}`));
+   if(extraQ) rows=rows.concat(await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${extraQ.g.map(x=>'wd:'+x.q).join(' ')}} VALUES ?term {${extraQ.t.map(x=>'wd:'+x.q).join(' ')}}
+     ?p p:P39 ?st . ?st ps:P39 ?pos . ?st pq:P2937 ?term . ${sel}}`));
+   const seen=new Set(); rows=rows.filter(b=>{const q=b.p.value; if(seen.has(q)) return false; seen.add(q); return true});
+   for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house:H.dbHouse||H.house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value});
    S.set(H.house,rows.length?'ok':'bad',H.house+' — '+rows.length+' people'+(rows.length?'':' (position found, but nobody currently holds it on Wikidata)')) }
   if(!all.length) throw new Error('Wikidata returned nobody. See the lines above for which step came back empty.');
   S.set('save','busy','Saving '+all.length+' rows to the database…');

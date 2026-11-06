@@ -5,8 +5,8 @@
 <section class="card" id="setup"></section>
 
 <section class="card"><h2>Daily run</h2>
-<p class="mut">One click: reads each news site’s feed, saves new articles, fetches their text politely, records edits and deletions, and notes which politicians are mentioned. If it says “more waiting”, click again.</p>
-<button id="run">▶ Run now</button><ul id="steps"></ul><div class="bar" id="barw" style="display:none"><i id="bar"></i></div><div id="runMsg" class="msg"></div></section>
+<p class="mut">One click: reads each news site’s feed, saves new articles, fetches their text politely, records edits and deletions, and notes which politicians are mentioned. Keep this page open while it runs — it goes site by site politely (a few seconds between pages on the same site), so a big run can take several minutes.</p>
+<div class="row"><button id="run">▶ Run now</button><button id="stop" class="ghost" style="display:none">■ Stop</button></div><ul id="steps"></ul><div class="bar" id="barw" style="display:none"><i id="bar"></i></div><div id="runMsg" class="msg"></div></section>
 
 <section class="card"><div class="row"><h2 style="flex:1;margin:0">Tracked articles</h2><button id="reload" class="ghost">↻ Reload</button></div>
 <div class="row" style="margin-top:10px"><select id="pf"><option value="">All politicians</option></select>
@@ -20,7 +20,8 @@ function parseFeed(text){const d=new DOMParser().parseFromString(text,'text/xml'
  d.querySelectorAll('item,entry').forEach(n=>{const l=n.querySelector('link'); const u=l&&(l.getAttribute('href')||l.textContent); const t=n.querySelector('title'); if(u) out.push({url:u.trim(),title:t&&t.textContent.trim()})});
  d.querySelectorAll('url > loc').forEach(n=>out.push({url:n.textContent.trim()})); return out}
 
-async function runAll(){ const S=steps($('steps')); clear($('runMsg')); $('barw').style.display='none';
+let STOP=false; $('stop').onclick=()=>{STOP=true;$('stop').textContent='Stopping…'};
+async function runAll(){ STOP=false; $('stop').style.display=''; $('stop').textContent='■ Stop'; const S=steps($('steps')); clear($('runMsg')); $('barw').style.display='none';
  try{
   S.add('src','Reading list of news sites'); S.set('src','busy'); const {rows:sources}=await api('news','GET','?action=sources'); const live=sources.filter(x=>!x.is_blocked);
   S.set('src','ok','Found '+live.length+' news sites'+(sources.length>live.length?' ('+(sources.length-live.length)+' skipped: blocked)':''));
@@ -34,15 +35,15 @@ async function runAll(){ const S=steps($('steps')); clear($('runMsg')); $('barw'
     else { const r=await api('news','POST','',{action:'ingest',source_id:s.id,items}); added+=r.added; S.set(id,'ok',esc(s.name)+' — '+items.length+' links, '+r.added+' new') }
    }catch(e){ S.set(id,'bad',esc(s.name)+' — '+esc(e.message)) } }
   let tot={processed:0,new:0,changed:0,deleted:0,mentions:0}, rem=null, first=null, guard=0, stall=0; $('barw').style.display='';
-  while(guard++<60){ S.set('art','busy','Fetching article text… '+tot.processed+' done'+(rem!=null?', '+rem+' waiting':''));
+  while(guard++<200){ S.set('art','busy','Fetching article text… '+tot.processed+' done'+(rem!=null?', '+rem+' waiting':''));
    const r=await api('news','POST','',{action:'process',limit:30}); for(const k in tot) tot[k]+=r[k]||0; rem=r.remaining; if(first==null) first=tot.processed+rem;
-   $('bar').style.width=Math.min(100,first?100*tot.processed/first:100)+'%'; if(rem<=0) break; if(r.processed===0&&r.skipped===0){ if(++stall>=2) break } else stall=0; if(guard>=4) break }
+   $('bar').style.width=Math.min(100,first?100*tot.processed/first:100)+'%'; if(rem<=0||STOP) break; if(r.processed===0&&r.skipped===0){ if(++stall>=2) break } else stall=0 }
   S.set('art',rem>0?'busy':'ok','Articles: '+tot.processed+' fetched · '+tot.new+' new · '+tot.changed+' edited · '+tot.deleted+' deleted · '+tot.mentions+' mentions'); $('bar').style.width=rem>0?'60%':'100%';
-  if(rem>0){ S.set('art','busy','Articles: '+tot.processed+' fetched, '+rem+' still waiting'); msg($('runMsg'),'busy','Paused to stay polite — <b>'+rem+'</b> articles are waiting. Click “Run now” again to continue.') }
+  if(rem>0){ S.set('art','busy','Articles: '+tot.processed+' fetched, '+rem+' still waiting'); msg($('runMsg'),'busy',(STOP?'Stopped':'Paused')+' — <b>'+rem+'</b> articles are still waiting. Click “Run now” to continue.') }
   else msg($('runMsg'),'ok','All done. '+added+' new links, '+tot.new+' new articles, '+tot.mentions+' politician mentions.');
   load();
  }catch(e){ msg($('runMsg'),'bad',esc(e.message)); throw e }}
-$('run').onclick=()=>busy($('run'),'Running…',runAll).catch(()=>{});
+$('run').onclick=()=>busy($('run'),'Running…',runAll).catch(()=>{}).finally(()=>{$('stop').style.display='none'});
 
 let DATA=[];
 async function load(){ $('listState').innerHTML='<span class="spin"></span> Loading…';

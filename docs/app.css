@@ -29,3 +29,5 @@ details summary{cursor:pointer;color:var(--mut);font-size:14px;margin-top:8px}
 ins{background:var(--add);text-decoration:none} del{background:var(--rem)}
 .badge{background:var(--bad);color:#fff;padding:1px 8px;border-radius:6px;font-size:12px}
 .item{padding:10px 0;border-bottom:1px solid var(--line)} .item .d .v{border-top:1px dashed var(--line);margin-top:8px;padding-top:6px;white-space:pre-wrap;font-size:14px}
+
+a{color:var(--acc)} a:visited{color:var(--acc)}

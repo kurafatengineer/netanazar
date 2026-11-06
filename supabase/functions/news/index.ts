@@ -36,26 +36,28 @@ function nextCheck(firstSeen: string, changed: boolean): string | null {
 
 // ---- polite per-domain fetching ----
 const lastHit = new Map<string, number>();
-const robots = new Map<string, { at: number; rules: string[] }>();
+const robots = new Map<string, { at: number; rules: string[]; delay: number }>();
 const failCount = new Map<string, number>();
 
 async function allowed(url: string): Promise<boolean> {
   const u = new URL(url); const host = u.host;
   let r = robots.get(host);
   if (!r || Date.now() - r.at > 864e5) {
-    const rules: string[] = [];
+    const rules: string[] = []; let delay = 0;
     try {
       const res = await fetch(`${u.protocol}//${host}/robots.txt`, { headers: { 'User-Agent': UA } });
       if (res.ok) {
         let applies = false;
         for (const line of (await res.text()).split(/\r?\n/)) {
-          const m = line.match(/^\s*(user-agent|disallow)\s*:\s*(.*?)\s*(#.*)?$/i); if (!m) continue;
-          if (m[1].toLowerCase() === 'user-agent') applies = m[2] === '*' || /netanazar/i.test(m[2]);
-          else if (applies && m[2]) rules.push(m[2]);
+          const m = line.match(/^\s*(user-agent|disallow|crawl-delay)\s*:\s*(.*?)\s*(#.*)?$/i); if (!m) continue;
+          const k = m[1].toLowerCase();
+          if (k === 'user-agent') applies = m[2] === '*' || /netanazar/i.test(m[2]);
+          else if (applies && k === 'crawl-delay') delay = Math.max(delay, Math.min(60, parseFloat(m[2]) || 0));
+          else if (applies && k === 'disallow' && m[2]) rules.push(m[2]);
         }
       }
     } catch { /* no robots => allowed */ }
-    r = { at: Date.now(), rules }; robots.set(host, r);
+    r = { at: Date.now(), rules, delay }; robots.set(host, r);
   }
   const path = u.pathname + u.search;
   return !r.rules.some((p) => path.startsWith(p.replace(/\*.*$/, '')));
@@ -65,7 +67,7 @@ async function politeGet(url: string, source: any, headers: Record<string, strin
   const host = new URL(url).host;
   if (source?.is_blocked) return { skipped: 'blocked' as const };
   if (!(await allowed(url))) return { skipped: 'robots' as const };
-  const delay = (source?.min_delay_seconds ?? 10) * 1000;
+  const delay = Math.max(source?.min_delay_seconds ?? 10, robots.get(host)?.delay ?? 0) * 1000;
   const wait = delay - (Date.now() - (lastHit.get(host) ?? 0));
   if (wait > 0) await sleep(wait);
   const t0 = Date.now(); let status: number | null = null; let text = ''; let h = new Headers();
@@ -75,7 +77,7 @@ async function politeGet(url: string, source: any, headers: Record<string, strin
   } catch { /* timeout / network */ }
   lastHit.set(host, Date.now());
   await db.from('fetch_log').insert({ source_id: source?.id ?? null, url, http_status: status, bytes: text.length, duration_ms: Date.now() - t0 });
-  if (status === 403 || status === 429 || status === 503) {
+  if (status === 400 || status === 401 || status === 403 || status === 429 || status === 503) {
     const n = (failCount.get(host) ?? 0) + 1; failCount.set(host, n);
     if (n >= 3 && source?.id) { await db.from('sources').update({ is_blocked: true }).eq('id', source.id); if (source) source.is_blocked = true; }
   } else if (status && status < 400) failCount.set(host, 0);
