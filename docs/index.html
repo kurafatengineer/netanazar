@@ -30,16 +30,17 @@ const HOUSES=[{house:'Lok Sabha',search:'member of the 18th Lok Sabha',ok:l=>/18
  {house:'Rajya Sabha',search:'member of the Rajya Sabha',ok:l=>/^member of (the )?rajya sabha/.test(l)},
  {house:'State Assembly',search:'member of the Delhi Legislative Assembly',ok:l=>/delhi/.test(l)&&/member/.test(l)}];
 const sparql=async q=>{let r; try{r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q))}catch{throw new Error('Wikidata could not be reached from this browser')}
- if(!r.ok) throw new Error('Wikidata answered '+r.status); return (await r.json()).results.bindings};
+ if(!r.ok){ const t=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,220); throw new Error('Wikidata answered '+r.status+(t?' — '+t:'')) } return (await r.json()).results.bindings};
+const findPositions=async term=>{ let r; try{r=await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&type=item&limit=30&language=en&format=json&origin=*&search='+encodeURIComponent(term))}catch{throw new Error('Wikidata search could not be reached from this browser')}
+ if(!r.ok) throw new Error('Wikidata search answered '+r.status); return ((await r.json()).search||[]).map(x=>({q:x.id,l:x.label||''}))};
 
 async function wikidata(){ const S=steps($('wdSteps')); HOUSES.forEach(h=>S.add(h.house,h.house)); S.add('save','Save to database'); clear($('wdMsg'));
  let all=[];
  try{
   for(const H of HOUSES){ S.set(H.house,'busy',H.house+' — searching Wikidata…');
-   const pos=await sparql(`SELECT ?pos ?posLabel WHERE{ SERVICE wikibase:mwapi{ bd:serviceParam wikibase:endpoint "www.wikidata.org"; wikibase:api "EntitySearch";
-     mwapi:search "${H.search}"; mwapi:language "en"; ?pos wikibase:apiOutputItem mwapi:item. } SERVICE wikibase:label{bd:serviceParam wikibase:language "en".} } LIMIT 30`);
-   const found=pos.map(b=>({q:b.pos.value.split('/').pop(),l:b.posLabel.value||''})).filter(x=>H.ok(x.l.toLowerCase()));
-   if(!found.length){ S.set(H.house,'bad',H.house+' — no matching position found on Wikidata (searched: “'+esc(H.search)+'”)'); continue }
+   const pos=await findPositions(H.search);
+   const found=pos.filter(x=>H.ok(x.l.toLowerCase()));
+   if(!found.length){ S.set(H.house,'bad',H.house+' — no matching position found on Wikidata (searched: “'+esc(H.search)+'”; Wikidata returned '+(pos.length?pos.map(x=>esc(x.l)).join(' | '):'nothing')+')'); continue }
    S.set(H.house,'busy',H.house+' — loading people… ('+found.length+' position item'+(found.length>1?'s':'')+')');
    const rows=await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${found.map(x=>'wd:'+x.q).join(' ')}}
     ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end}
