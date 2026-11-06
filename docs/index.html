@@ -16,7 +16,7 @@
 <p><button id="pasteBtn" class="ghost">Match pasted text</button></p></details></section>
 
 <section class="card"><div class="row"><h2 style="flex:1;margin:0">3. Results</h2><button id="reload" class="ghost">↻ Reload</button></div>
-<div id="resState" class="mut"></div><div class="wrap"><table id="tbl"></table></div></section>
+<div class="row"><input id="q" type="search" placeholder="Search name, party, seat…" size="30"><select id="hf"><option value="">All houses</option><option>Lok Sabha</option><option>Rajya Sabha</option><option>State Assembly</option></select></div><div id="resState" class="mut"></div><div class="wrap"><table id="tbl"></table></div></section>
 </main>
 <script src="app.js"></script>
 <script>
@@ -31,8 +31,8 @@ const latest=arr=>{const mx=Math.max(0,...arr.map(x=>ord(x.l)));return mx?arr.fi
 const HOUSES=[
  {house:'Lok Sabha',search:'member of the 18th Lok Sabha',ok:l=>/18th lok sabha/.test(l),
   extra:{pos:'member of the Lok Sabha',posOk:l=>/^member of (the )?lok sabha$/.test(l),term:'18th Lok Sabha',termOk:l=>/^18th lok sabha$/.test(l)}},
- {house:'Rajya Sabha',search:'Rajya Sabha',ok:l=>/member/.test(l)&&/rajya sabha/.test(l)&&!/\d(st|nd|rd|th)/.test(l)},
- {house:'State Assembly (Delhi)',dbHouse:'State Assembly',search:'Delhi Legislative Assembly',ok:l=>/member/.test(l)&&/delhi/.test(l),pick:latest}];
+ {house:'Rajya Sabha',recent:true,search:'Rajya Sabha',ok:l=>/member/.test(l)&&/rajya sabha/.test(l)&&!/\d(st|nd|rd|th)/.test(l)},
+ {house:'State Assembly (Delhi)',dbHouse:'State Assembly',search:'member of the Delhi Legislative Assembly',ok:l=>/member/.test(l)&&/delhi/.test(l)&&!/election/.test(l),pick:latest}];
 const sparql=async q=>{let r; try{r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q))}catch{throw new Error('Wikidata could not be reached from this browser')}
  if(!r.ok){ const t=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,220); throw new Error('Wikidata answered '+r.status+(t?' — '+t:'')) } return (await r.json()).results.bindings};
 const findPositions=async term=>{ let r; try{r=await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&type=item&limit=30&language=en&format=json&origin=*&search='+encodeURIComponent(term))}catch{throw new Error('Wikidata search could not be reached from this browser')}
@@ -53,9 +53,9 @@ async function wikidata(){ const S=steps($('wdSteps')); HOUSES.forEach(h=>S.add(
     OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}`;
    let rows=[];
    if(found.length) rows=rows.concat(await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${found.map(x=>'wd:'+x.q).join(' ')}}
-     ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end} ${sel}}`));
+     ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end} FILTER NOT EXISTS{?p wdt:P570 ?dod} ${H.recent?`?st pq:P580 ?start FILTER(?start >= "${new Date(Date.now()-6.2*365.25*864e5).toISOString().slice(0,10)}T00:00:00Z"^^xsd:dateTime)`:''} ${sel}}`));
    if(extraQ) rows=rows.concat(await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${extraQ.g.map(x=>'wd:'+x.q).join(' ')}} VALUES ?term {${extraQ.t.map(x=>'wd:'+x.q).join(' ')}}
-     ?p p:P39 ?st . ?st ps:P39 ?pos . ?st pq:P2937 ?term . ${sel}}`));
+     ?p p:P39 ?st . ?st ps:P39 ?pos . ?st pq:P2937 ?term . FILTER NOT EXISTS{?p wdt:P570 ?dod} ${sel}}`));
    const seen=new Set(); rows=rows.filter(b=>{const q=b.p.value; if(seen.has(q)) return false; seen.add(q); return true});
    for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house:H.dbHouse||H.house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value});
    S.set(H.house,rows.length?'ok':'bad',H.house+' — '+rows.length+' people'+(rows.length?'':' (position found, but nobody currently holds it on Wikidata)')) }
@@ -80,12 +80,17 @@ $('chkBtn').onclick=()=>busy($('chkBtn'),'Reading page…',async()=>{ msg($('chk
  const d=new DOMParser().parseFromString(await r.text(),'text/html'); await runCheck(d.body.innerText||d.body.textContent) }).catch(e=>{ if(e) msg($('chkMsg'),'bad',esc(e.message)) });
 $('pasteBtn').onclick=()=>busy($('pasteBtn'),'Matching…',async()=>{ if(!$('paste').value.trim()){ msg($('chkMsg'),'bad','Paste some text first.'); throw 0 } msg($('chkMsg'),'busy','Matching…'); await runCheck($('paste').value) }).catch(e=>{ if(e) msg($('chkMsg'),'bad',esc(e.message)) });
 
+let PEOPLE=[],GOT={};
+function drawTable(){ const q=$('q').value.trim().toLowerCase(), hf=$('hf').value;
+ const rows=PEOPLE.filter(x=>(!hf||x.house===hf)&&(!q||[x.name_en,x.party,x.constituency].some(v=>(v||'').toLowerCase().includes(q))));
+ const shown=rows.slice(0,200);
+ $('tbl').innerHTML=shown.length?'<tr><th>Name<th>Party<th>House<th>Seat'+Object.values(SOURCES).map(s=>'<th>'+s[0]).join('')+'</tr>'+shown.map(x=>'<tr><td>'+esc(x.name_en)+'<td>'+esc(x.party||'')+'<td>'+esc(x.house)+'<td>'+esc(x.constituency||'')+Object.keys(SOURCES).map(k=>'<td>'+({true:'✅',false:'❌'}[GOT[x.id+'|'+k]]||'–')).join('')+'</tr>').join(''):'';
+ $('resState').innerHTML=PEOPLE.length?(rows.length+' of '+PEOPLE.length+' politicians'+(rows.length>200?' — showing the first 200, use search to narrow down':'')):'<div class="empty">No politicians yet. Use step 1.</div>' }
 async function loadResults(){ $('resState').innerHTML='<span class="spin"></span> Loading…';
  try{ const [{rows:p},{rows:c}]=await Promise.all([api('registry','GET','?action=politicians'),api('registry','GET','?action=checks')]);
-  const got={}; c.forEach(x=>got[x.politician_id+'|'+x.source]=x.found);
-  $('tbl').innerHTML=p.length?'<tr><th>Name<th>Party<th>House<th>Seat'+Object.values(SOURCES).map(s=>'<th>'+s[0]).join('')+'</tr>'+p.map(x=>'<tr><td>'+esc(x.name_en)+'<td>'+esc(x.party||'')+'<td>'+esc(x.house)+'<td>'+esc(x.constituency||'')+Object.keys(SOURCES).map(k=>'<td>'+({true:'✅',false:'❌'}[got[x.id+'|'+k]]||'–')).join('')+'</tr>').join(''):'';
-  $('resState').innerHTML=p.length?p.length+' politicians in the database':'<div class="empty">No politicians yet. Use step 1.</div>';
+  GOT={}; c.forEach(x=>GOT[x.politician_id+'|'+x.source]=x.found); PEOPLE=p; drawTable();
  }catch(e){ $('tbl').innerHTML=''; $('resState').innerHTML='<span class="chip bad">✗ '+esc(e.message)+'</span>' }}
+$('q').oninput=drawTable; $('hf').onchange=drawTable;
 $('reload').onclick=loadResults;
 NN.setup({onReady:loadResults});
 </script></body></html>

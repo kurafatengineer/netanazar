@@ -107,7 +107,11 @@ function lineDiff(a: string, b: string) {
 let polCache: { at: number; rows: any[] } | null = null;
 async function politicians() {
   if (polCache && Date.now() - polCache.at < 60000) return polCache.rows;
-  const { data } = await db.from('politicians').select('id,name_en,name_hi,name_variants,party').limit(10000);
+  const data: any[] = [];
+  for (let from = 0; ; from += 1000) {   // Supabase returns at most 1000 rows per request
+    const { data: part } = await db.from('politicians').select('id,name_en,name_hi,name_variants,party').order('id').range(from, from + 999);
+    data.push(...(part ?? [])); if (!part || part.length < 1000) break;
+  }
   const rows = (data ?? []).map((p: any) => ({ ...p,
     variants: [p.name_en, p.name_hi, ...(p.name_variants ?? [])].filter(Boolean) }));
   polCache = { at: Date.now(), rows }; return rows;
