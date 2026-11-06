@@ -159,12 +159,13 @@ async function ingest(items: { url: string; title?: string }[], sourceId: string
 }
 
 // ---- process due articles within a time budget ----
-async function processDue(limit: number, budgetMs: number) {
+async function processDue(limit: number, budgetMs: number, sourceId?: string) {
   const t0 = Date.now(); const stats = { processed: 0, new: 0, changed: 0, same: 0, deleted: 0, unreachable: 0, skipped: 0, mentions: 0 };
   const pols = await politicians();
   const { data: srcs } = await db.from('sources').select('*'); const byId = new Map((srcs ?? []).map((s: any) => [s.id, s]));
-  const { data: due } = await db.from('articles').select('*').lte('next_check_at', nowIso()).neq('status', 'deleted')
-    .order('next_check_at', { ascending: true }).limit(limit);
+  let dq = db.from('articles').select('*').lte('next_check_at', nowIso()).neq('status', 'deleted');
+  if (sourceId) dq = dq.eq('source_id', sourceId);
+  const { data: due } = await dq.order('next_check_at', { ascending: true }).limit(limit);
   // interleave domains so one domain's delay does not stall the rest
   const q = [...(due ?? [])];
   while (q.length && Date.now() - t0 < budgetMs) {
@@ -199,7 +200,9 @@ async function processDue(limit: number, budgetMs: number) {
     } else { stats.unreachable++; await db.from('articles').update({ status: 'unreachable', last_checked_at: ts }).eq('id', a.id); }
     await db.from('articles').update({ next_check_at: nextCheck(a.first_seen_at, changed) }).eq('id', a.id);
   }
-  const { count } = await db.from('articles').select('id', { count: 'exact', head: true }).lte('next_check_at', nowIso()).neq('status', 'deleted');
+  let cq = db.from('articles').select('id', { count: 'exact', head: true }).lte('next_check_at', nowIso()).neq('status', 'deleted');
+  if (sourceId) cq = cq.eq('source_id', sourceId);
+  const { count } = await cq;
   return { ...stats, remaining: count ?? 0 };
 }
 
@@ -240,7 +243,7 @@ Deno.serve(async (req) => {
       }
       return json({ added: await ingest(items, s.id), found: items.length });
     }
-    if (b.action === 'process') return json(await processDue(Math.min(b.limit ?? 30, 60), 100000));
+    if (b.action === 'process') return json(await processDue(Math.min(b.limit ?? 30, 60), 100000, b.source_id ?? undefined));
     return json({ error: 'unknown action' }, 400);
   } catch (e) { return json({ error: String((e as Error).message ?? e) }, 500); }
 });

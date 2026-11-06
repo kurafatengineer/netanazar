@@ -5,7 +5,7 @@
 <section class="card" id="setup"></section>
 
 <section class="card"><h2>Daily run</h2>
-<p class="mut">One click: reads each news site’s feed, saves new articles, fetches their text politely, records edits and deletions, and notes which politicians are mentioned. Keep this page open while it runs — it goes site by site politely (a few seconds between pages on the same site), so a big run can take several minutes.</p>
+<p class="mut">One click: reads each news site’s feed, saves new articles, fetches their text politely, records edits and deletions, and notes which politicians are mentioned. Keep this page open while it runs. All news sites are read at the same time, but each site gets only one request at a time with a few seconds’ gap, so a big run can still take several minutes.</p>
 <div class="row"><button id="run">▶ Run now</button><button id="stop" class="ghost" style="display:none">■ Stop</button></div><ul id="steps"></ul><div class="bar" id="barw" style="display:none"><i id="bar"></i></div><div id="runMsg" class="msg"></div></section>
 
 <section class="card"><div class="row"><h2 style="flex:1;margin:0">Tracked articles</h2><button id="reload" class="ghost">↻ Reload</button></div>
@@ -24,23 +24,35 @@ let STOP=false; $('stop').onclick=()=>{STOP=true;$('stop').textContent='Stopping
 async function runAll(){ STOP=false; $('stop').style.display=''; $('stop').textContent='■ Stop'; const S=steps($('steps')); clear($('runMsg')); $('barw').style.display='none';
  try{
   S.add('src','Reading list of news sites'); S.set('src','busy'); const {rows:sources}=await api('news','GET','?action=sources'); const live=sources.filter(x=>!x.is_blocked);
-  S.set('src','ok','Found '+live.length+' news sites'+(sources.length>live.length?' ('+(sources.length-live.length)+' skipped: blocked)':''));
-  for(const s of live) S.add('s'+s.id,s.name||s.domain); S.add('art','Fetching article text'); let added=0;
-  for(const s of live){ const id='s'+s.id; S.set(id,'busy',esc(s.name)+' — reading feed from your browser…'); let items=[],how='browser';
-   for(const u of [...(s.rss_urls||[]),...(s.sitemap_url?[s.sitemap_url]:[])]){ try{const r=await fetch(u); if(!r.ok) throw 0; items=items.concat(parseFeed(await r.text()))}catch{how='server';break} }
+  S.set('src','ok','Found '+live.length+' news sites'+(sources.length>live.length?' ('+(sources.length-live.length)+' skipped: blocked)':'')+' — all running at the same time');
+  for(const s of live) S.add('s'+s.id,esc(s.name||s.domain)+' — waiting');
+  let added=0; const tot={processed:0,new:0,changed:0,deleted:0,mentions:0}; const per={}; let first=0; let done=0;
+  const bar=()=>{ $('bar').style.width=first?Math.min(100,100*done/first)+'%':'0%' };
+  $('barw').style.display='';
+
+  // one lane per site, all lanes in parallel; inside a lane only ONE request at a time (polite)
+  async function lane(s){ const id='s'+s.id, nm=esc(s.name||s.domain); let items=[],how='browser';
    try{
-    if(!(s.rss_urls||[]).length&&!s.sitemap_url){ S.set(id,'bad',esc(s.name)+' — no feed address saved'); continue }
-    if(how==='server'||!items.length){ S.set(id,'busy',esc(s.name)+' — site blocks browser reading, trying from our server…'); const r=await api('news','POST','',{action:'fetchfeed',source_id:s.id}); added+=r.added||0;
-     S.set(id,r.skipped?'bad':'ok',esc(s.name)+' — '+(r.skipped?'skipped ('+r.skipped+')':'server read, '+(r.added||0)+' new links')) }
-    else { const r=await api('news','POST','',{action:'ingest',source_id:s.id,items}); added+=r.added; S.set(id,'ok',esc(s.name)+' — '+items.length+' links, '+r.added+' new') }
-   }catch(e){ S.set(id,'bad',esc(s.name)+' — '+esc(e.message)) } }
-  let tot={processed:0,new:0,changed:0,deleted:0,mentions:0}, rem=null, first=null, guard=0, stall=0; $('barw').style.display='';
-  while(guard++<200){ S.set('art','busy','Fetching article text… '+tot.processed+' done'+(rem!=null?', '+rem+' waiting':''));
-   const r=await api('news','POST','',{action:'process',limit:30}); for(const k in tot) tot[k]+=r[k]||0; rem=r.remaining; if(first==null) first=tot.processed+rem;
-   $('bar').style.width=Math.min(100,first?100*tot.processed/first:100)+'%'; if(rem<=0||STOP) break; if(r.processed===0&&r.skipped===0){ if(++stall>=2) break } else stall=0 }
-  S.set('art',rem>0?'busy':'ok','Articles: '+tot.processed+' fetched · '+tot.new+' new · '+tot.changed+' edited · '+tot.deleted+' deleted · '+tot.mentions+' mentions'); $('bar').style.width=rem>0?'60%':'100%';
-  if(rem>0){ S.set('art','busy','Articles: '+tot.processed+' fetched, '+rem+' still waiting'); msg($('runMsg'),'busy',(STOP?'Stopped':'Paused')+' — <b>'+rem+'</b> articles are still waiting. Click “Run now” to continue.') }
-  else msg($('runMsg'),'ok','All done. '+added+' new links, '+tot.new+' new articles, '+tot.mentions+' politician mentions.');
+    S.set(id,'busy',nm+' — reading feed…');
+    if(!(s.rss_urls||[]).length&&!s.sitemap_url){ S.set(id,'bad',nm+' — no feed address saved'); return }
+    for(const u of [...(s.rss_urls||[]),...(s.sitemap_url?[s.sitemap_url]:[])]){ try{const r=await fetch(u); if(!r.ok) throw 0; items=items.concat(parseFeed(await r.text()))}catch{how='server';break} }
+    let n=0; if(how==='server'||!items.length){ S.set(id,'busy',nm+' — browser cannot read it, trying from our server…'); const r=await api('news','POST','',{action:'fetchfeed',source_id:s.id}); if(r.skipped){ S.set(id,'bad',nm+' — skipped ('+r.skipped+')'); return } n=r.added||0 }
+    else { n=(await api('news','POST','',{action:'ingest',source_id:s.id,items})).added }
+    added+=n; let fetched=0, rem=null, stall=0, newV=0, men=0;
+    while(!STOP){ S.set(id,'busy',nm+' — '+n+' new links · text fetched: '+fetched+(rem!=null?' · waiting: '+rem:''));
+     const r=await api('news','POST','',{action:'process',limit:30,source_id:s.id});
+     fetched+=r.processed; newV+=r.new+r.changed; men+=r.mentions; for(const k in tot) tot[k]+=r[k]||0; done+=r.processed; first=Math.max(first,done+r.remaining+0); rem=r.remaining; bar();
+     if(rem<=0) break; if(r.processed===0){ if(r.skipped>0||++stall>=2) break } else stall=0 }
+    per[id]={fetched,rem};
+    S.set(id,STOP&&rem>0?'busy':'ok',nm+' — '+n+' new links · '+fetched+' articles read · '+men+' mentions'+(rem>0?' · '+rem+' still waiting':''));
+   }catch(e){ S.set(id,'bad',nm+' — '+esc(e.message)) } }
+  S.add('art','Totals'); S.set('art','busy','Working on all sites…');
+  const tick=setInterval(()=>S.set('art','busy','Totals so far: '+tot.processed+' articles read · '+tot.new+' new · '+tot.changed+' edited · '+tot.deleted+' deleted · '+tot.mentions+' mentions'),1000);
+  await Promise.all(live.map(lane)); clearInterval(tick);
+  const left=Object.values(per).reduce((a,x)=>a+(x.rem>0?x.rem:0),0);
+  S.set('art',left>0?'busy':'ok','Totals: '+tot.processed+' articles read · '+tot.new+' new · '+tot.changed+' edited · '+tot.deleted+' deleted · '+tot.mentions+' mentions'); $('bar').style.width=left>0?'60%':'100%';
+  if(left>0) msg($('runMsg'),'busy',(STOP?'Stopped':'Paused')+' — <b>'+left+'</b> articles are still waiting. Click “Run now” to continue.');
+  else msg($('runMsg'),'ok','All done. '+added+' new links, '+tot.new+' new articles read, '+tot.mentions+' politician mentions.');
   load();
  }catch(e){ msg($('runMsg'),'bad',esc(e.message)); throw e }}
 $('run').onclick=()=>busy($('run'),'Running…',runAll).catch(()=>{}).finally(()=>{$('stop').style.display='none'});
