@@ -173,11 +173,19 @@ async function stopJob() {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
-  if (!TOKEN || (req.headers.get('x-token') ?? '').trim() !== TOKEN) return json({ error: 'forbidden', secret_set: !!TOKEN }, 403);
+  let cronOnly = false;
+  if (!TOKEN || (req.headers.get('x-token') ?? '').trim() !== TOKEN) {
+    // The daily schedule uses its own secret, which may only start an update.
+    const c = (req.headers.get('x-cron') ?? '').trim(); let ok = false;
+    if (c) { const { data } = await db.from('cron_auth').select('secret').eq('id', 1).maybeSingle(); ok = !!data?.secret && data.secret === c; }
+    if (!ok) return json({ error: 'forbidden', secret_set: !!TOKEN }, 403);
+    cronOnly = true;
+  }
   try {
     const url = new URL(req.url);
     if (req.method === 'GET') { const a = url.searchParams.get('action'); if (a === 'progress') return json(await progress()); return json({ error: 'unknown action' }, 400); }
     const b = await req.json();
+    if (cronOnly && b.action !== 'start') return json({ error: 'forbidden' }, 403);
     if (b.action === 'start') return json(await startJob(Array.isArray(b.stages) && b.stages.length ? b.stages : ['members', 'attendance', 'positions', 'news']));
     if (b.action === 'run') { EdgeRuntime.waitUntil(runTask(b.job_id, b.task_id).catch(() => {})); return json({ accepted: true }, 202); }
     if (b.action === 'stop') return json(await stopJob());
