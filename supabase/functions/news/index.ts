@@ -203,8 +203,8 @@ async function processDue(limit: number, budgetMs: number) {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
-  const token = Deno.env.get('REGISTRY_TOKEN');
-  if (!token || req.headers.get('x-token') !== token) return json({ error: 'forbidden' }, 403);
+  const token = (Deno.env.get('REGISTRY_TOKEN') ?? '').trim();
+  if (!token || (req.headers.get('x-token') ?? '').trim() !== token) return json({ error: 'forbidden', secret_set: !!token }, 403);
   try {
     const url = new URL(req.url);
     if (req.method === 'GET') {
