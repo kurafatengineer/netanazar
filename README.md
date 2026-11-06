@@ -26,3 +26,9 @@ Insert a row in `politicians` (put Hindi/English spelling variants in `name_vari
 - Dashboard reads with the service key server-side; keep it behind auth/private network. RLS blocks anonymous access.
 - Blocked domains (repeated 403/429/503) get `sources.is_blocked = true`; we rely on GDELT metadata for them.
 - Phase 2 (X, YouTube): schema is ready for extra source types; not built yet.
+
+## Registry (one-click, from your own browser)
+`docs/index.html` is a static page (publish with GitHub Pages: Settings -> Pages -> branch -> `/docs`). Your browser reads Wikidata / official sites like a normal visit and hands results to the Supabase Edge Function `registry`, which writes to the database. Pattern borrowed from the `testing` repo: the browser reads, the backend only stores.
+- Set the secret `REGISTRY_TOKEN` in Supabase -> Edge Functions -> Secrets, and type the same token on the page.
+- Sites that forbid reading from another web page (CORS) can't be fetched automatically: use the paste box on the page.
+- The older Flask `/registry` bookmarklet flow still works if you run the dashboard.

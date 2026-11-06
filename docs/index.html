@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NetaNazar Registry</title>
+<style>
+:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--line:#e3e3e3;--acc:#1a56db}
+@media(prefers-color-scheme:dark){:root{--bg:#121212;--fg:#eee;--mut:#9a9a9a;--line:#2c2c2c;--acc:#6ea0ff}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px system-ui;max-width:980px;margin:auto}
+button{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer}
+button.alt{background:transparent;color:var(--acc)} input,textarea,select{font:inherit;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);max-width:100%}
+.card{border:1px solid var(--line);border-radius:10px;padding:12px;margin:12px 0} .mut{color:var(--mut);font-size:13px}
+table{border-collapse:collapse;width:100%;font-size:14px} td,th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+.wrap{overflow-x:auto} #log{white-space:pre-wrap;font-size:13px;color:var(--mut)}
+</style></head><body>
+<h1>NetaNazar · Registry</h1>
+<div class="card"><b>Setup (once)</b><br>
+Function URL: <input id="fn" size="44" placeholder="https://qajsvaeamujtpdsutzgo.supabase.co/functions/v1/registry"><br>
+Token: <input id="tok" type="password" placeholder="REGISTRY_TOKEN"> <button class="alt" onclick="saveCfg()">Save</button>
+<div class="mut">Saved only in this browser.</div></div>
+
+<div class="card"><b>1. Wikidata → list of MPs / MLAs</b>
+<p class="mut">Your browser asks Wikidata directly, then hands the rows to the database.</p>
+<button onclick="wikidata()">Fetch from Wikidata</button></div>
+
+<div class="card"><b>2. Check against an official site</b>
+<p class="mut">Click once: your browser opens the page like a normal visit and every politician is checked for a match.
+If a site refuses to be read by another web page, the box below lets you paste the page text instead.</p>
+<select id="src"></select> <input id="u" size="40" placeholder="page address"> <button onclick="fetchCheck()">Fetch &amp; match</button>
+<p><textarea id="paste" rows="4" style="width:100%" placeholder="Fallback: open the page yourself, select all, copy, paste here"></textarea>
+<button class="alt" onclick="pasteCheck()">Match pasted text</button></p></div>
+
+<div id="log"></div>
+<div class="card"><b>3. Results</b> <button class="alt" onclick="loadResults()">Reload</button>
+<div class="wrap"><table id="tbl"></table></div></div>
+
+<script>
+const SOURCES={loksabha:['Lok Sabha','https://sansad.in/ls/members'],rajyasabha:['Rajya Sabha','https://rajyasabha.nic.in/Members/Alphabetical'],
+eci:['ECI','https://results.eci.gov.in/'],myneta:['MyNeta','https://www.myneta.info/'],prs:['PRS','https://prsindia.org/mptrack'],delhi:['Delhi Assembly','https://delhiassembly.delhi.gov.in/']};
+const Q={'Lok Sabha':['member of the 18th Lok Sabha'],'Rajya Sabha':['member of the Rajya Sabha'],'State Assembly':['member of the Delhi Legislative Assembly']};
+const $=id=>document.getElementById(id), log=t=>$('log').textContent=t;
+const cfg=()=>({fn:localStorage.getItem('nn_fn')||'',tok:localStorage.getItem('nn_tok')||''});
+$('fn').value=cfg().fn||'https://qajsvaeamujtpdsutzgo.supabase.co/functions/v1/registry'; $('tok').value=cfg().tok;
+function saveCfg(){localStorage.setItem('nn_fn',$('fn').value.trim());localStorage.setItem('nn_tok',$('tok').value);log('Saved.');loadResults()}
+for(const [k,[n,u]] of Object.entries(SOURCES)) $('src').add(new Option(n,k));
+$('src').onchange=()=>$('u').value=SOURCES[$('src').value][1]; $('u').value=SOURCES.loksabha[1];
+async function api(method,qs,body){const c=cfg();
+ const r=await fetch(c.fn+(qs||''),{method,headers:{'x-token':c.tok,'content-type':'application/json'},body:body&&JSON.stringify(body)});
+ if(!r.ok) throw new Error('server '+r.status); return r.json()}
+
+const HON=new Set('shri smt dr prof sri shrimati mr mrs ms adv capt col gen'.split(' '));
+const norm=s=>(s||'').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
+const esc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+function nameIn(en,hi,t){ if(hi&&t.includes(norm(hi))) return true;
+ const w=norm(en).split(' ').filter(x=>!HON.has(x)&&x.length>1); if(w.length<2) return false;
+ for(const o of [w,[...w].reverse()]) if(new RegExp('(?<![\\p{L}\\p{N}_])'+o.map(esc).join('\\s+(?:[\\p{L}\\p{N}_]+\\s+)?')+'(?![\\p{L}\\p{N}_])','u').test(t)) return true; return false}
+
+async function wikidata(){ try{ let all=[];
+ for(const [house,labels] of Object.entries(Q)){ log('Fetching '+house+' …');
+  const vals=labels.map(l=>`"${l}"@en`).join(' ');
+  const q=`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{VALUES ?pl {${vals}} ?pos rdfs:label ?pl .
+   ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end}
+   ?p rdfs:label ?en FILTER(LANG(?en)="en") OPTIONAL{?p rdfs:label ?hi FILTER(LANG(?hi)="hi")}
+   OPTIONAL{?p wdt:P102 ?party . ?party rdfs:label ?partyL FILTER(LANG(?partyL)="en")}
+   OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}}`;
+  const r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q)); if(!r.ok) throw new Error('Wikidata '+r.status);
+  const rows=(await r.json()).results.bindings; log(house+': '+rows.length+' rows');
+  for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value})}
+ const res=await api('POST','',{action:'wikidata',rows:all}); log('Done: '+JSON.stringify(res)+' (from '+all.length+' rows)'); loadResults()
+}catch(e){log('Error: '+e.message+(String(e).includes('Failed')?' (blocked by browser/CORS?)':''))}}
+
+async function runCheck(text){ const src=$('src').value; const {rows}=await api('GET','?action=politicians'); const t=norm(text); const results={}; let n=0;
+ for(const p of rows){const f=nameIn(p.name_en,p.name_hi,t); results[p.id]=f; if(f)n++}
+ await api('POST','',{action:'checks',source:src,results}); log(SOURCES[src][0]+': matched '+n+' of '+rows.length); loadResults()}
+async function fetchCheck(){ try{ log('Fetching page …'); const r=await fetch($('u').value); if(!r.ok) throw new Error('site '+r.status);
+ const html=await r.text(); const d=new DOMParser().parseFromString(html,'text/html'); await runCheck(d.body.innerText||d.body.textContent)
+}catch(e){log('Could not read that site from the browser ('+e.message+'). Use the paste box instead.')}}
+async function pasteCheck(){ try{ if(!$('paste').value.trim()) return log('Paste some text first'); await runCheck($('paste').value)}catch(e){log('Error: '+e.message)}}
+
+async function loadResults(){ try{ const [{rows:p},{rows:c}]=await Promise.all([api('GET','?action=politicians'),api('GET','?action=checks')]);
+ const got={}; c.forEach(x=>got[x.politician_id+'|'+x.source]=x.found);
+ $('tbl').innerHTML='<tr><th>Name<th>Party<th>House'+Object.values(SOURCES).map(s=>'<th>'+s[0]).join('')+'</tr>'+
+  p.map(x=>'<tr><td>'+x.name_en.replace(/</g,'&lt;')+'<td>'+(x.party||'')+'<td>'+x.house+Object.keys(SOURCES).map(k=>'<td>'+({true:'✅',false:'❌'}[got[x.id+'|'+k]]||'–')).join('')+'</tr>').join('')
+}catch(e){$('tbl').innerHTML='<tr><td>'+(cfg().tok?'Could not load: '+e.message:'Enter the token above first.')}}
+if(cfg().tok) loadResults();
+</script></body></html>
