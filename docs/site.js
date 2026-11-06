@@ -134,14 +134,16 @@
   function home() {
     setTitle(''); const cur = MEM.filter((m) => m.is_current !== false);
     const ls = cur.filter((m) => m.house === 'Lok Sabha').length, rs = cur.filter((m) => m.house === 'Rajya Sabha').length;
-    view.innerHTML = `<section class="hero"><div class="wrap"><h1><span>Know your</span><span class="mp" aria-label="MP"><b>M</b><b>P</b></span></h1><div id="heroSearch"></div>
+    view.innerHTML = `<section class="hero"><div class="wrap"><h1>Know your MP</h1><div id="heroSearch"></div>
       ${cur.length ? `<div class="stats"><span>${ic('users')} <b class="tnum">${cur.length}</b> sitting members</span><span>${ic('bank')} <b class="tnum">${ls}</b> Lok Sabha</span><span>${ic('buildings')} <b class="tnum">${rs}</b> Rajya Sabha</span>${UPDATED ? `<span>${ic('clock')} Updated ${esc(fmtTime(UPDATED))}</span>` : ''}</div><div class="legend"><span><i class="k">${ic('check')}</i> Active</span><span><i class="k off">${ic('x')}</i> Former</span><span>Ring Colour = Party</span></div>` : ''}</div></section>
       <div class="wrap" id="homeBody"></div>`;
     const inp = mountSearch($('#heroSearch'), false); if (matchMedia('(min-width:700px)').matches) inp.focus({ preventScroll: true });
     const body = $('#homeBody');
     if (!MEM.length) { body.innerHTML = `<div class="empty">${ic('database')}<div><b>No members loaded yet.</b></div><div>The data is refreshed from the admin page.</div></div>`; return; }
     const t = TREND.map((x) => ({ m: BYID.get(x.politician_id), n: x.stories })).filter((x) => x.m);
-    if (t.length) body.innerHTML = `<section class="section"><h2>${ic('fire')} In the news this week</h2><div class="rail">${t.map((x) => `<a class="tcard" href="#/m/${x.m.id}" style="text-decoration:none;color:inherit">${avatar(x.m, 'm')}<span><div class="n">${esc(x.m.name_en)}</div><div class="s">${esc(x.m.party || '')} · ${esc(seatOf(x.m))}</div></span><span class="hot">${x.n}<small>STORIES</small></span></a>`).join('')}</div></section>`;
+    if (t.length) { const mx = Math.max(...t.map((x) => x.n), 1);
+      body.innerHTML = `<section class="section"><h2>${ic('fire')} In the news this week</h2><div class="nlist">${t.map((x, i) => { const w = Math.round(24 + 76 * x.n / mx); const ps = partyStyle(x.m.party);
+        return `<a class="nrow" href="#/m/${x.m.id}" style="--party:${ps.bg};--pf:${ps.fg};--w:${w}%"><span class="rk tnum">${i + 1}</span>${avatar(x.m, 'm')}<span class="nm">${esc(x.m.name_en)}</span><span class="db" role="img" aria-label="${x.n} ${x.n == 1 ? 'story' : 'stories'}"><i class="bl"></i><i class="ln"></i><b class="br tnum">${x.n}</b></span></a>`; }).join('')}</div></section>`; }
   }
   function group(kind, arg) {
     const decoded = arg; let title = '', sub = '', list = [], seg = true;
@@ -174,8 +176,8 @@
         <div class="facts">${m.constituency ? `<span>${ic('map-pin')} <b><a href="#/seat/${encodeURIComponent(m.constituency)}" style="color:inherit">${esc(m.constituency)}</a></b></span>` : ''}${m.state ? `<span><a href="#/state/${encodeURIComponent(m.state)}" style="color:inherit">${esc(m.state)}</a></span>` : ''}
           ${m.terms_count ? `<span><b class="tnum">${m.terms_count}</b> ${m.terms_count == 1 ? 'Term' : 'Terms'}</span>` : ''}
           ${m.term_label && m.house === 'Rajya Sabha' ? `<span>Term <b class="tnum">${esc(m.term_label)}</b></span>` : ''}${m.elected_current ? `<span>${ic('calendar-check')} <b>${esc(m.elected_current)}</b></span>` : ''}</div></div></section>
-      <div class="cols"><div><section class="card" id="careerCard" hidden></section><section class="card" id="newsCard"><h3>${ic('path')} In the news</h3><div class="skel" style="height:90px"></div></section><section class="card" id="posCard"><h3>${ic('clipboard-text')} Positions held</h3><div class="skel" style="height:90px"></div></section></div>
-      <aside class="aside"><section class="card" id="attCard"><h3>${ic('chart-bar')} Attendance</h3><div class="skel" style="height:140px"></div></section></aside></div></div>`;
+      <div class="cols"><div><section class="card" id="careerCard" hidden></section><section class="card" id="newsCard"><h3>${ic('path')} In the news</h3><div class="skel" style="height:90px"></div></section></div>
+      <aside class="aside"><section class="card" id="attCard"><h3>${ic('chart-bar')} Attendance</h3><div class="skel" style="height:140px"></div></section><section class="card" id="posCard"><h3>${ic('clipboard-text')} Positions held</h3><div class="skel" style="height:90px"></div></section></aside></div></div>`;
     mountSearchTop(); window.scrollTo(0, 0);
     const q = (p) => api(p).catch(() => null);
     const [det, att, news] = await Promise.all([q('v_member_detail?select=positions_held,details_fetched_at,seat_history&id=eq.' + id), q('v_attendance?select=session_no,session_period,sitting_days,signed_days,loksabha&order=session_no.asc&politician_id=eq.' + id), q('v_news_timeline?select=article_id,url,title,source_name,source_domain,day,at,status&order=at.desc&limit=600&politician_id=eq.' + id)]);
@@ -207,7 +209,7 @@
       cols.push(`<div class="trm ${prev ? (same ? '' : 'dash') : ''}" style="--sc:${col};--lc:${same ? col : 'var(--line-2)'}"><div class="yr">${LS_YEAR[n] || ''}</div><div class="nd">${n}<sup>${ord(n)}</sup></div><div class="seat">${esc(e.seat || '—')}</div>${e.state ? `<div class="sub">${esc(e.state)}</div>` : ''}${e.party ? `<div class="pty ${pc ? 'pc' : ''}">${esc(e.party)}${pc ? ' · changed' : ''}</div>` : ''}</div>`);
       prev = e;
     }
-    el.hidden = false; el.innerHTML = `<h3>${ic('bank')} Lok Sabha Career</h3><p class="career-sum">${sum}</p><div class="career">${cols.join('')}</div>`;
+    el.hidden = false; el.innerHTML = `<h3>${ic('bank')} Lok Sabha Career</h3><div class="career">${cols.join('')}</div>`;
   }
   function drawAttendance(m, att) {
     const el = $('#attCard'); if (!el) return;
@@ -279,7 +281,7 @@
     window.scrollTo(0, 0);
   }
   function theme() {
-    const t = safeGet('nn_theme'); if (t) document.documentElement.setAttribute('data-theme', t);
+    document.documentElement.setAttribute('data-theme', safeGet('nn_theme') || 'dark');
     $('#themeBtn')?.addEventListener('click', () => { const cur = document.documentElement.getAttribute('data-theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); const nx = cur === 'dark' ? 'light' : 'dark'; document.documentElement.setAttribute('data-theme', nx); safeSet('nn_theme', nx); });
   }
   async function boot() {

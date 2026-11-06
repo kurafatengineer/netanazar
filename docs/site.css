@@ -113,9 +113,7 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 /* ---------- home ---------- */
 .hero{padding:clamp(40px,10vh,104px) 0 28px;text-align:center}
 .hero h1{font:500 clamp(34px,6vw,56px)/1.05 var(--f-display);letter-spacing:-.025em;margin:0 0 28px}
-.hero h1{display:flex;align-items:center;justify-content:center;gap:.22em}
-.hero h1 .mp{display:inline-flex;flex-direction:column;line-height:.76;font:700 .66em var(--f-display);color:var(--accent);letter-spacing:0;font-style:normal}
-.hero h1 .mp b{font-weight:600}
+.hero h1{text-align:center;font-style:normal}
 .hero .search{max-width:680px;margin:0 auto}
 .stats{display:flex;justify-content:center;gap:28px;flex-wrap:wrap;margin-top:26px;color:var(--ink-2);font-size:14px}
 .stats b{color:var(--ink);font-weight:650}
@@ -152,7 +150,7 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 .profile-head .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
 .profile-head .facts{margin-top:12px;color:var(--ink-2);font-size:14.5px;display:flex;gap:6px 18px;flex-wrap:wrap}
 .profile-head .facts b{color:var(--ink);font-weight:600}
-.cols{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;margin-top:24px;align-items:start}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 400px;gap:24px;margin-top:24px;align-items:start}
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);padding:20px;box-shadow:var(--shadow-1)}
 .card+.card{margin-top:18px}
 .card h3{font:600 13px var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 14px;display:flex;align-items:center;gap:8px}
@@ -243,7 +241,7 @@ footer .wrap span{display:block;max-width:760px;margin:0 auto}
 .skel{background:linear-gradient(90deg,var(--sunk),var(--line),var(--sunk));background-size:200% 100%;animation:sk 1.2s infinite;border-radius:12px;min-height:16px}
 @keyframes sk{to{background-position:-200% 0}} @keyframes fade{from{opacity:0}} @keyframes rise{from{opacity:0;transform:translateY(14px)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-@media (max-width:900px){.cols{grid-template-columns:1fr}.aside{order:-1}}
+@media (max-width:900px){.cols{grid-template-columns:1fr}}
 @media (max-width:640px){
   .topbar.has-search .brand>span:not(.mark){display:none}
   .topbar .wrap{gap:8px} #topSearch{min-width:0;margin-left:4px!important}
@@ -259,3 +257,17 @@ footer .wrap span{display:block;max-width:760px;margin:0 auto}
   .scrim{align-items:flex-end;padding:0} .sheet{border-radius:24px 24px 0 0;max-height:92vh}
   .pos .p{flex-basis:84px} .row{padding:12px 14px}
 }
+
+/* In the news this week: stacked leaderboard, avatar inset in a pill, dumbbell shows the story count */
+.nlist{display:flex;flex-direction:column;gap:10px;max-width:760px;margin:0 auto}
+.nrow{display:flex;align-items:center;gap:14px;padding:10px 20px 10px 12px;background:var(--surface);border-radius:999px;text-decoration:none;color:inherit;transition:transform .15s,background .15s}
+.nrow:hover{transform:translateX(4px);background:color-mix(in srgb,var(--surface) 82%,var(--party))}
+.nrow .rk{flex:none;width:22px;text-align:center;font:600 13px var(--f-ui);color:var(--muted)}
+.nrow .nm{flex:1 1 auto;min-width:0;font:600 17px/1.25 var(--f-ui);overflow-wrap:anywhere}
+.nrow .db{flex:0 0 clamp(110px,38%,280px);position:relative;height:36px;display:block}
+.nrow .db .ln{position:absolute;left:8px;top:50%;height:5px;margin-top:-2.5px;width:calc(var(--w) - 16px);border-radius:99px;background:linear-gradient(90deg,color-mix(in srgb,var(--party) 35%,transparent),var(--party))}
+.nrow .db .bl{position:absolute;left:0;top:50%;width:14px;height:14px;margin-top:-7px;border-radius:50%;background:color-mix(in srgb,var(--party) 55%,var(--surface));box-shadow:0 0 0 3px var(--surface)}
+.nrow .db .br{position:absolute;left:var(--w);top:50%;transform:translate(-100%,-50%);min-width:36px;height:36px;padding:0 8px;box-sizing:border-box;border-radius:50%;display:grid;place-items:center;background:var(--party);color:var(--pf,#fff);font:650 14px var(--f-ui)}
+@media (max-width:560px){.nrow{padding-right:12px;gap:10px}.nrow .nm{font-size:15px}.nrow .db{flex-basis:34%}.nrow .rk{display:none}}
+/* inputs: no outline border */
+.in,.in.ok{border-color:transparent}

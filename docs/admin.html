@@ -7,16 +7,17 @@
 <title>NetaNazar · Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,500&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap">
+<script>try{document.documentElement.setAttribute("data-theme",localStorage.getItem("nn_theme")||"dark")}catch(e){document.documentElement.setAttribute("data-theme","dark")}</script>
 <link rel="stylesheet" href="site.css">
 <style>
  .admin{max-width:860px;margin:0 auto;padding:8px 20px 40px}
  h1.t{font:500 clamp(28px,4vw,38px)/1.1 var(--f-display);letter-spacing:-.02em;margin:26px 0 4px}
  .lead{color:var(--ink-2);margin:0 0 22px}
  .field-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
- .in{height:48px;padding:0 22px;border:1px solid var(--line);border-radius:999px;background:var(--sunk);color:var(--ink);font:500 15px var(--f-ui);min-width:0;flex:1;transition:background .2s,border-color .2s,color .2s}
- .in.ok{background:var(--ok-soft);border-color:var(--ok);color:var(--ok);font-weight:600}
+ .in{height:48px;padding:0 22px;border:0;border-radius:999px;background:var(--sunk);color:var(--ink);font:500 15px var(--f-ui);min-width:0;flex:1;transition:background .2s,border-color .2s,color .2s}
+ .in.ok{background:var(--ok-soft);color:var(--ok);font-weight:600}
  .in.ok:focus{box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
- .in:focus{outline:0;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+ .in:focus{outline:0;background:var(--surface);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
  .hero-card{padding:26px;background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--surface) 72%,var(--accent-soft)));box-shadow:var(--shadow-2)}
  .admin .btn,.admin .mini{border-radius:999px}
  .go{height:60px;padding:0 32px;border-radius:999px;font-size:18px;gap:12px;min-width:60px}
