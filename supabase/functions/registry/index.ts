@@ -108,25 +108,34 @@ async function officialAttendance() {
   return { sessions, rows: rows.length };
 }
 
-// Positions held ("Elected to 18th Lok Sabha", committees, ministries…), one request per member, in small batches
-async function officialDetails(house: string, offset: number, limit: number) {
+// Positions held ("Elected to 18th Lok Sabha", committees, ministries…): one request per member, in small batches.
+// onlyStale: only members never loaded or older than 7 days. New positions found on a later run are flagged with added_at.
+async function officialDetails(house: string, limit: number, onlyStale: boolean, offset: number) {
   const prefix = house === 'Lok Sabha' ? 'LS:' : 'RS:';
-  const pols = (await all('politicians', 'id,official_id')).filter((p) => String(p.official_id ?? '').startsWith(prefix));
-  const slice = pols.slice(offset, offset + limit); let done = 0, failed = 0;
+  const everyone = (await all('politicians', 'id,official_id,details_fetched_at,positions_held')).filter((p) => String(p.official_id ?? '').startsWith(prefix));
+  const staleBefore = Date.now() - 7 * 864e5;
+  const todo = onlyStale ? everyone.filter((p) => !p.details_fetched_at || new Date(p.details_fetched_at).getTime() < staleBefore) : everyone;
+  const slice = onlyStale ? todo.slice(0, limit) : todo.slice(offset, offset + limit);
+  let done = 0, failed = 0, newPositions = 0;
   for (const p of slice) {
     const code = String(p.official_id).slice(3);
     const url = house === 'Lok Sabha' ? `https://sansad.in/api_ls/member/positionHeld?mpCode=${code}&locale=en` : `https://sansad.in/api_rs/member/position-held?mpCode=${code}&locale=en`;
     try {
       const data = await getJson(url);
-      const positions = (Array.isArray(data) ? data : []).map((x: any) => ({ period: tidy(x.period), text: stripHtml(x.positionHeld ?? x.position).slice(0, 300) })).filter((x: any) => x.text).slice(0, 25);
+      const old: any[] | null = Array.isArray(p.positions_held) ? p.positions_held : null;
+      const known = new Map((old ?? []).map((x: any) => [`${x.period}|${x.text}`, x.added_at ?? null]));
+      const stamp = new Date().toISOString();
+      const positions = (Array.isArray(data) ? data : []).map((x: any) => ({ period: tidy(x.period), text: stripHtml(x.positionHeld ?? x.position).slice(0, 300) })).filter((x: any) => x.text).slice(0, 40)
+        .map((x: any) => { const k = `${x.period}|${x.text}`; if (known.has(k)) return { ...x, added_at: known.get(k) }; if (old) newPositions++; return { ...x, added_at: old ? stamp : null }; });
       const el = positions.find((x: any) => /elected to (the )?18th lok sabha/i.test(x.text)) ?? positions.find((x: any) => /elected to/i.test(x.text));
-      await db.from('politicians').update({ positions_held: positions, elected_current: el ? `${el.text.replace(/^elected to /i, '')} · ${el.period}` : null, details_fetched_at: new Date().toISOString() }).eq('id', p.id);
+      await db.from('politicians').update({ positions_held: positions, elected_current: el ? `${el.text.replace(/^elected to /i, '')} \u00b7 ${el.period}` : null, details_fetched_at: new Date().toISOString() }).eq('id', p.id);
       done++;
     } catch { failed++; }
     await sleep(700);
   }
   const next = offset + slice.length;
-  return { house, total: pols.length, offset, done, failed, next_offset: next, finished: next >= pols.length };
+  const remaining = onlyStale ? Math.max(0, todo.length - done) : Math.max(0, everyone.length - next);
+  return { house, total: everyone.length, offset, done, failed, new_positions: newPositions, next_offset: next, remaining, finished: remaining === 0 || slice.length === 0 };
 }
 
 async function importOfficial(house: string, rows: any[], markStale: boolean) {
@@ -186,6 +195,16 @@ Deno.serve(async (req) => {
     if (req.method === 'GET') {
       const action = url.searchParams.get('action');
       if (action === 'politicians') return json({ rows: await all('politicians', 'id,name_en,name_hi,party,house,constituency,state,wikidata_id,is_current,source,photo_url,gender,terms_count,lok_sabha_terms,term_label,term_start,term_end,minister_position,elected_current,official_id,details_fetched_at') });
+      if (action === 'status') {
+        const cnt = async (f: (q: any) => any) => { const { count } = await f(db.from('politicians').select('id', { count: 'exact', head: true })); return count ?? 0; };
+        const [ls, rs, other, former, withDetails] = await Promise.all([
+          cnt((q) => q.like('official_id', 'LS:%').neq('is_current', false)), cnt((q) => q.like('official_id', 'RS:%').neq('is_current', false)),
+          cnt((q) => q.is('official_id', null).neq('is_current', false)), cnt((q) => q.eq('is_current', false)), cnt((q) => q.not('details_fetched_at', 'is', null))]);
+        const { count: att } = await db.from('attendance').select('id', { count: 'exact', head: true });
+        const { data: last } = await db.from('politicians').select('imported_at').not('imported_at', 'is', null).order('imported_at', { ascending: false }).limit(1);
+        const { data: lastAtt } = await db.from('attendance').select('fetched_at').order('fetched_at', { ascending: false }).limit(1);
+        return json({ lok_sabha: ls, rajya_sabha: rs, others: other, former, with_positions: withDetails, attendance_rows: att ?? 0, members_updated_at: last?.[0]?.imported_at ?? null, attendance_updated_at: lastAtt?.[0]?.fetched_at ?? null });
+      }
       if (action === 'attendance') return json({ rows: await all('attendance', 'id,politician_id,session_no,session_period,sitting_days,signed_days,loksabha') });
       if (action === 'member') {
         const id = url.searchParams.get('id')!;
@@ -224,7 +243,7 @@ Deno.serve(async (req) => {
     if (body.action === 'official_attendance') return json(await officialAttendance());
     if (body.action === 'official_details') {
       if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
-      return json(await officialDetails(body.house, Math.max(0, +body.offset || 0), Math.min(+body.limit || 60, 80)));
+      return json(await officialDetails(body.house, Math.min(+body.limit || 40, 60), !!body.only_stale, Math.max(0, +body.offset || 0)));
     }
     if (body.action === 'official') {
       if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);

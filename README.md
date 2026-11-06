@@ -27,8 +27,16 @@ Insert a row in `politicians` (put Hindi/English spelling variants in `name_vari
 - Blocked domains (repeated 403/429/503) get `sources.is_blocked = true`; we rely on GDELT metadata for them.
 - Phase 2 (X, YouTube): schema is ready for extra source types; not built yet.
 
-## Registry (one-click, from your own browser)
-`docs/index.html` is a static page (publish with GitHub Pages: Settings -> Pages -> branch -> `/docs`). Your browser reads Wikidata / official sites like a normal visit and hands results to the Supabase Edge Function `registry`, which writes to the database. Pattern borrowed from the `testing` repo: the browser reads, the backend only stores.
-- Set the secret `REGISTRY_TOKEN` in Supabase -> Edge Functions -> Secrets, and type the same token on the page.
-- Sites that forbid reading from another web page (CORS) can't be fetched automatically: use the paste box on the page.
-- The older Flask `/registry` bookmarklet flow still works if you run the dashboard.
+## Pages (GitHub Pages, folder `/docs`)
+- `index.html` — **public site**: search any MP/MLA (name, party, constituency, state) with suggestions; profile with photo, status (green sitting / red former), attendance by session, positions held, and a date-wise "road" of news mentions; click a day for a source -> story flow, click a story for its edit history and a link to the original.
+- `admin.html` — **admin panel**: one click "Update everything" (members, attendance, positions, news). Needs the admin token (`REGISTRY_TOKEN`).
+
+The public site only reads read-only views (`v_members`, `v_attendance`, `v_news_timeline`, `v_article_changes`, `v_trending`, `v_member_detail`) with the publishable key. See `supabase/migrations/0009_*` and `0010_*`.
+
+## Edge functions (Supabase)
+`registry` (members, attendance, positions from sansad.in) and `news` (feeds -> politely fetch -> keep only stories that name a member). Sources are in `supabase/functions/`.
+
+## Notes
+- Only public information is stored. Article text is never shown publicly; the public site shows headlines, sources, times and a summary of edits.
+- Sites that block our server are paused automatically; we never try to bypass a block.
+- Facebook / Instagram / X are not collected yet; the timeline already has slots and icons for them.

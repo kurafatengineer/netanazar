@@ -1,205 +1,30 @@
 <!doctype html>
-<html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NetaNazar Registry</title><link rel="stylesheet" href="app.css"><style>.av{width:38px;height:38px;border-radius:50%;object-fit:cover;background:var(--line);display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:var(--mut)}.big{width:120px;height:140px;object-fit:cover;border-radius:12px;background:var(--line)}tr.clk{cursor:pointer}tr.clk:hover td{background:var(--line)}.mdl{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:20;overflow:auto;padding:16px}.mdl.open{display:block}.mdlc{max-width:760px;margin:20px auto;background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:18px}.pos{padding-left:18px;font-size:14px}.pos li{margin:6px 0}</style></head><body><main>
-<header><h1>NetaNazar</h1><nav><a class="on" href="index.html">Politicians</a><a href="news.html">News</a></nav></header>
-<section class="card" id="setup"></section>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>NetaNazar · Know your MP</title>
+<meta name="description" content="Search any MP or MLA: attendance, positions held, and the days they were in the news.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,500&family=Noto+Sans+Devanagari:wght@400;500;600&family=Noto+Serif+Devanagari:wght@400;500&display=swap">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="#/"><span class="mark" id="mark"></span><span>NetaNazar</span><span class="hi">नेता नज़र</span></a>
+  <div id="topSearch" hidden style="flex:1;max-width:520px;margin-left:12px"></div>
+  <div class="spacer"></div>
+  <button class="iconbtn" id="themeBtn" aria-label="Switch light or dark theme" title="Light / dark"><span id="themeIc"></span></button>
+</div></header>
 
-<section class="card"><h2>1. Official member list from sansad.in</h2>
-<p class="mut">One click per house. Our server reads the public member list that sansad.in itself uses (current, sitting members only: name, party, seat, state — no phone numbers or addresses) and updates the database. Safe to repeat any time: it matches the same people again and only changes what changed.</p>
-<div class="row"><button id="lsBtn">⬇ Load Lok Sabha (540)</button><button id="rsBtn">⬇ Load Rajya Sabha (244)</button><button id="attBtn" class="ghost">⬇ Attendance (Lok Sabha)</button></div>
-<div class="row" style="margin-top:8px"><button id="posLsBtn" class="ghost">⬇ Positions held · Lok Sabha</button><button id="posRsBtn" class="ghost">⬇ Positions held · Rajya Sabha</button></div>
-<p class="mut" style="margin-top:6px">Photo, party, seat, terms and minister post come with the main load. <b>Attendance</b> takes about half a minute. <b>Positions held</b> (e.g. “Elected to 18th Lok Sabha · June 2024”, committees) needs one request per member, politely spaced, so it takes about 10 minutes per house — you can stop it and continue later.</p>
-<ul id="oSteps"></ul><div id="oLoadMsg" class="msg"></div>
-<details><summary>Backup: paste or upload the list manually</summary>
-<p class="mut">Use this only if the one-click load ever stops working. Open the list on sansad.in, select all, copy, paste here.</p>
-<div class="row"><select id="oh"><option>Lok Sabha</option><option>Rajya Sabha</option></select>
-<a href="https://sansad.in/ls/members" target="_blank" rel="noopener">Open Lok Sabha list ↗</a><a href="https://sansad.in/rs/members" target="_blank" rel="noopener">Open Rajya Sabha list ↗</a>
-<label class="mut"><input type="file" id="ofile" accept=".csv,.txt" style="display:none"><span class="chip" style="cursor:pointer" onclick="document.getElementById('ofile').click()">or upload CSV</span></label></div>
-<textarea id="opaste" rows="4" placeholder="Paste the copied member list here"></textarea>
-<div id="oMap" style="display:none"><p class="mut" style="margin-top:10px">We found <b id="oCount">0</b> members. Check the columns, then import.</p>
-<div class="row" id="oSel"></div><div class="wrap"><table id="oPrev"></table></div>
-<label class="mut"><input type="checkbox" id="oSit" checked> Only members marked SITTING (ignore former)</label><br>
-<label class="mut"><input type="checkbox" id="oStale" checked> Mark people already in my list but missing from this official list as “former”</label>
-<p><button id="oBtn">⬆ Import official list</button></p></div>
-<div id="oMsg" class="msg"></div></details></section>
+<main id="view"></main>
 
-<section class="card"><h2>2. State assemblies and extra details from Wikidata (optional)</h2>
-<p class="mut">Your browser asks Wikidata directly and saves the list of MPs / MLAs with party and seat.</p>
-<button id="wdBtn">⬇ Fetch from Wikidata</button><ul id="wdSteps"></ul><div id="wdMsg" class="msg"></div></section>
+<div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-label="Story details"><div class="sheet" id="sheet"></div></div>
 
-<section class="card"><h2>3. Check a list against our database</h2>
-<p class="mut">Click once: the page is opened from your browser and every politician is searched in it. If the site refuses, use the paste box.</p>
-<div class="row"><select id="src"></select><input id="u" size="40" placeholder="page address"><button id="chkBtn">Fetch &amp; match</button></div>
-<div id="chkMsg" class="msg"></div>
-<details open><summary>Paste text instead</summary><textarea id="paste" rows="4" placeholder="Open the page yourself, select all, copy, paste here"></textarea>
-<p><button id="pasteBtn" class="ghost">Match pasted text</button></p></details></section>
+<footer><div class="wrap"><span>Members, parties, seats and attendance come from the official Lok Sabha and Rajya Sabha records (sansad.in). Stories are matched to members by name from public news feeds, so a match can occasionally be wrong.</span><span><a href="admin.html">Admin</a></span></div></footer>
 
-<section class="card"><div class="row"><h2 style="flex:1;margin:0">4. Results</h2><button id="reload" class="ghost">↻ Reload</button></div>
-<div class="row"><input id="q" type="search" placeholder="Search name, party, seat…" size="30"><label class="mut"><input type="checkbox" id="fm"> show former</label> <select id="hf"><option value="">All houses</option><option>Lok Sabha</option><option>Rajya Sabha</option><option>State Assembly</option></select></div><div id="resState" class="mut"></div><div class="wrap"><table id="tbl"></table></div></section>
-</main>
-<div id="mdl" class="mdl"><div class="mdlc"><button id="mdlClose" class="ghost" style="float:right">✕ Close</button><div id="mdlBody"></div></div></div>
-<script src="app.js"></script>
-<script>
-const {$,esc,api,msg,clear,busy,steps}=NN;
-const SOURCES={loksabha:['Lok Sabha','https://sansad.in/ls/members'],rajyasabha:['Rajya Sabha','https://rajyasabha.nic.in/Members/Alphabetical'],
-eci:['ECI','https://results.eci.gov.in/'],myneta:['MyNeta','https://www.myneta.info/'],prs:['PRS','https://prsindia.org/mptrack'],delhi:['Delhi Assembly','https://delhiassembly.delhi.gov.in/']};
-for(const [k,[n]] of Object.entries(SOURCES)) $('src').add(new Option(n,k));
-$('src').onchange=()=>$('u').value=SOURCES[$('src').value][1]; $('u').value=SOURCES.loksabha[1];
-
-const ord=l=>{const m=l.match(/(\d+)(st|nd|rd|th)/);return m?+m[1]:0};
-const latest=arr=>{const mx=Math.max(0,...arr.map(x=>ord(x.l)));return mx?arr.filter(x=>ord(x.l)===mx):arr};
-const HOUSES=[
- {house:'Lok Sabha',search:'member of the 18th Lok Sabha',ok:l=>/18th lok sabha/.test(l),
-  extra:{pos:'member of the Lok Sabha',posOk:l=>/^member of (the )?lok sabha$/.test(l),term:'18th Lok Sabha',termOk:l=>/^18th lok sabha$/.test(l)}},
- {house:'Rajya Sabha',recent:true,search:'Rajya Sabha',ok:l=>/member/.test(l)&&/rajya sabha/.test(l)&&!/\d(st|nd|rd|th)/.test(l)},
- {house:'State Assembly (Delhi)',dbHouse:'State Assembly',search:'member of the Delhi Legislative Assembly',ok:l=>/member/.test(l)&&/delhi/.test(l)&&!/election/.test(l),pick:latest}];
-const sparql=async q=>{let r; try{r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q))}catch{throw new Error('Wikidata could not be reached from this browser')}
- if(!r.ok){ const t=(await r.text().catch(()=>'')).replace(/\s+/g,' ').slice(0,220); throw new Error('Wikidata answered '+r.status+(t?' — '+t:'')) } return (await r.json()).results.bindings};
-const findPositions=async term=>{ let r; try{r=await fetch('https://www.wikidata.org/w/api.php?action=wbsearchentities&type=item&limit=30&language=en&format=json&origin=*&search='+encodeURIComponent(term))}catch{throw new Error('Wikidata search could not be reached from this browser')}
- if(!r.ok) throw new Error('Wikidata search answered '+r.status); return ((await r.json()).search||[]).map(x=>({q:x.id,l:x.label||''}))};
-
-async function wikidata(){ const S=steps($('wdSteps')); HOUSES.forEach(h=>S.add(h.house,h.house)); S.add('save','Save to database'); clear($('wdMsg'));
- let all=[];
- try{
-  for(const H of HOUSES){ S.set(H.house,'busy',H.house+' — searching Wikidata…');
-   let pos=await findPositions(H.search); let found=pos.filter(x=>H.ok(x.l.toLowerCase())); if(H.pick) found=H.pick(found);
-   let extraQ=null;
-   if(H.extra){ const [gp,tm]=await Promise.all([findPositions(H.extra.pos),findPositions(H.extra.term)]);
-     const g=gp.filter(x=>H.extra.posOk(x.l.toLowerCase())), t=tm.filter(x=>H.extra.termOk(x.l.toLowerCase())); if(g.length&&t.length) extraQ={g,t} }
-   if(!found.length&&!extraQ){ S.set(H.house,'bad',H.house+' — no matching position found on Wikidata (searched: “'+esc(H.search)+'”; Wikidata returned '+(pos.length?pos.map(x=>esc(x.l)).join(' | '):'nothing')+')'); continue }
-   S.set(H.house,'busy',H.house+' — loading people… ('+found.length+' position item'+(found.length==1?'':'s')+(extraQ?' + term list':'')+')');
-   const sel=`?p rdfs:label ?en FILTER(LANG(?en)="en") OPTIONAL{?p rdfs:label ?hi FILTER(LANG(?hi)="hi")}
-    OPTIONAL{?p wdt:P102 ?party . ?party rdfs:label ?partyL FILTER(LANG(?partyL)="en")}
-    OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}`;
-   let rows=[];
-   if(found.length) rows=rows.concat(await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${found.map(x=>'wd:'+x.q).join(' ')}}
-     ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end} FILTER NOT EXISTS{?p wdt:P570 ?dod} ${H.recent?`?st pq:P580 ?start FILTER(?start >= "${new Date(Date.now()-6.2*365.25*864e5).toISOString().slice(0,10)}T00:00:00Z"^^xsd:dateTime)`:''} ${sel}}`));
-   if(extraQ) rows=rows.concat(await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${extraQ.g.map(x=>'wd:'+x.q).join(' ')}} VALUES ?term {${extraQ.t.map(x=>'wd:'+x.q).join(' ')}}
-     ?p p:P39 ?st . ?st ps:P39 ?pos . ?st pq:P2937 ?term . FILTER NOT EXISTS{?p wdt:P570 ?dod} ${sel}}`));
-   const seen=new Set(); rows=rows.filter(b=>{const q=b.p.value; if(seen.has(q)) return false; seen.add(q); return true});
-   for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house:H.dbHouse||H.house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value});
-   S.set(H.house,rows.length?'ok':'bad',H.house+' — '+rows.length+' people'+(rows.length?'':' (position found, but nobody currently holds it on Wikidata)')) }
-  if(!all.length) throw new Error('Wikidata returned nobody. See the lines above for which step came back empty.');
-  S.set('save','busy','Saving '+all.length+' rows to the database…');
-  const res=await api('registry','POST','',{action:'wikidata',rows:all});
-  S.set('save','ok','Saved: '+res.inserted+' new, '+res.updated+' updated'); msg($('wdMsg'),'ok','Done — '+all.length+' politicians processed.'); loadResults();
- }catch(e){ S.set('save','bad','Not saved'); msg($('wdMsg'),'bad',esc(e.message)); throw e }}
-$('wdBtn').onclick=()=>busy($('wdBtn'),'Fetching…',wikidata).catch(()=>{});
-
-const HON=new Set('shri smt dr prof sri shrimati mr mrs ms adv capt col gen'.split(' '));
-const norm=s=>(s||'').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
-const rx=s=>s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
-function nameIn(en,hi,t){ if(hi&&t.includes(norm(hi))) return true; const w=norm(en).split(' ').filter(x=>!HON.has(x)&&x.length>1); if(w.length<2) return false;
- for(const o of [w,[...w].reverse()]) if(new RegExp('(?<![\\p{L}\\p{N}_])'+o.map(rx).join('\\s+(?:[\\p{L}\\p{N}_]+\\s+)?')+'(?![\\p{L}\\p{N}_])','u').test(t)) return true; return false}
-async function runCheck(text){ const src=$('src').value; const {rows}=await api('registry','GET','?action=politicians'); if(!rows.length) throw new Error('No politicians in the database yet — run step 1 first.');
- const t=norm(text); const results={}; let n=0; for(const p of rows){const f=nameIn(p.name_en,p.name_hi,t); results[p.id]=f; if(f)n++}
- await api('registry','POST','',{action:'checks',source:src,results}); msg($('chkMsg'),'ok',SOURCES[src][0]+': found <b>'+n+'</b> of '+rows.length+' politicians on this page'); loadResults() }
-$('chkBtn').onclick=()=>busy($('chkBtn'),'Reading page…',async()=>{ msg($('chkMsg'),'busy','Opening the page from your browser…');
- let r; try{r=await fetch($('u').value)}catch{ msg($('chkMsg'),'bad','This site does not allow reading from another web page. Open it yourself, copy the text, and use “Paste text instead”.'); throw 0 }
- if(!r.ok){ msg($('chkMsg'),'bad','Site answered '+r.status+'. Use “Paste text instead”.'); throw 0 }
- const d=new DOMParser().parseFromString(await r.text(),'text/html'); await runCheck(d.body.innerText||d.body.textContent) }).catch(e=>{ if(e) msg($('chkMsg'),'bad',esc(e.message)) });
-$('pasteBtn').onclick=()=>busy($('pasteBtn'),'Matching…',async()=>{ if(!$('paste').value.trim()){ msg($('chkMsg'),'bad','Paste some text first.'); throw 0 } msg($('chkMsg'),'busy','Matching…'); await runCheck($('paste').value) }).catch(e=>{ if(e) msg($('chkMsg'),'bad',esc(e.message)) });
-
-let PEOPLE=[],GOT={},ATT={};
-const pct=(a)=>a&&a.sitting?Math.min(100,Math.round(100*a.signed/a.sitting)):null;
-const avatar=x=>x.photo_url?'<img class="av" loading="lazy" referrerpolicy="no-referrer" src="'+esc(x.photo_url)+'" alt="" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{className:\'av ph\',textContent:\''+esc((x.name_en||'?')[0])+'\'}))">':'<span class="av ph">'+esc((x.name_en||'?')[0])+'</span>';
-function attCell(x){ if(x.house!=='Lok Sabha') return '–'; if(x.minister_position) return '<span class="mut" title="Ministers do not sign the attendance register">n/a (minister)</span>'; const a=ATT[x.id]; const v=pct(a); return v==null?'–':v+'%' }
-function drawTable(){ const q=$('q').value.trim().toLowerCase(), hf=$('hf').value;
- const rows=PEOPLE.filter(x=>($('fm').checked||x.is_current!==false)&&(!hf||x.house===hf)&&(!q||[x.name_en,x.name_hi,x.party,x.constituency,x.state].some(v=>(v||'').toLowerCase().includes(q))));
- const shown=rows.slice(0,200); const hasChecks=Object.keys(GOT).length>0;
- $('tbl').innerHTML=shown.length?'<tr><th><th>Name<th>Party<th>House<th>Seat / State<th>Terms<th>Elected<th>Attendance'+(hasChecks?Object.values(SOURCES).map(s=>'<th>'+s[0]).join(''):'')+'</tr>'+shown.map(x=>'<tr class="clk" data-id="'+x.id+'"><td>'+avatar(x)+'<td><b>'+esc(x.name_en)+'</b>'+(x.minister_position?'<div class="mut">'+esc(x.minister_position)+'</div>':'')+'<td>'+esc(x.party||'')+'<td>'+esc(x.house)+'<td>'+esc(x.constituency||x.state||'')+(x.constituency&&x.state?'<div class="mut">'+esc(x.state)+'</div>':'')+'<td>'+(x.house==='Lok Sabha'&&x.lok_sabha_terms&&x.lok_sabha_terms.length?esc(x.lok_sabha_terms.join(', '))+' <span class="mut">('+x.terms_count+')</span>':(x.terms_count?x.terms_count:'–'))+'<td>'+esc(x.elected_current||x.term_label||'–')+'<td>'+attCell(x)+(hasChecks?Object.keys(SOURCES).map(k=>'<td>'+({true:'✅',false:'❌'}[GOT[x.id+'|'+k]]||'–')).join(''):'')+'</tr>').join(''):'';
- $('resState').innerHTML=PEOPLE.length?(rows.length+' of '+PEOPLE.length+' politicians'+(rows.length>200?' — showing the first 200, use search to narrow down':'')+' · click a row for details'):'<div class="empty">No politicians yet. Use step 1.</div>' }
-async function loadResults(){ $('resState').innerHTML='<span class="spin"></span> Loading…';
- try{ const [{rows:p},{rows:c},{rows:at}]=await Promise.all([api('registry','GET','?action=politicians'),api('registry','GET','?action=checks'),api('registry','GET','?action=attendance')]);
-  GOT={}; c.forEach(x=>GOT[x.politician_id+'|'+x.source]=x.found); ATT={}; at.forEach(x=>{const o=ATT[x.politician_id]||(ATT[x.politician_id]={signed:0,sitting:0}); o.signed+=Math.min(x.signed_days||0,x.sitting_days||0); o.sitting+=x.sitting_days||0}); PEOPLE=p; drawTable();
- }catch(e){ $('tbl').innerHTML=''; $('resState').innerHTML='<span class="chip bad">✗ '+esc(e.message)+'</span>' }}
-$('q').oninput=drawTable; $('fm').onchange=drawTable; $('hf').onchange=drawTable;
-
-// ---- member detail window ----
-$('tbl').onclick=async e=>{ const tr=e.target.closest('tr.clk'); if(!tr) return; const box=$('mdlBody'); $('mdl').classList.add('open'); box.innerHTML='<p><span class="spin"></span> Loading…</p>';
- try{ const {member:m,attendance:att}=await api('registry','GET','?action=member&id='+tr.dataset.id);
-  const rows=(att||[]).map(a=>{const p=a.sitting_days?Math.min(100,Math.round(100*Math.min(a.signed_days,a.sitting_days)/a.sitting_days)):null; return '<tr><td>Session '+a.session_no+'<td>'+esc(a.session_period||'')+'<td>'+(m.minister_position?'n/a':a.signed_days+' / '+a.sitting_days)+'<td>'+(m.minister_position||p==null?'–':p+'%')+'</tr>'}).join('');
-  const pos=(m.positions_held||[]).map(x=>'<li><span class="mut">'+esc(x.period)+'</span> — '+esc(x.text)+'</li>').join('');
-  box.innerHTML='<div class="row" style="align-items:flex-start;gap:16px">'+(m.photo_url?'<img class="big" referrerpolicy="no-referrer" src="'+esc(m.photo_url)+'" alt="">':'')+'<div><h2 style="margin:0">'+esc(m.name_en)+'</h2>'+(m.name_hi?'<div class="mut">'+esc(m.name_hi)+'</div>':'')+
-   '<p style="margin:6px 0"><span class="chip">'+esc(m.party||'—')+'</span> <span class="chip">'+esc(m.house)+'</span>'+(m.is_current===false?' <span class="chip bad">former</span>':'')+(m.minister_position?' <span class="chip ok">'+esc(m.minister_position)+'</span>':'')+'</p>'+
-   '<div>'+(m.constituency?'Constituency: <b>'+esc(m.constituency)+'</b> · ':'')+(m.state?'State: <b>'+esc(m.state)+'</b>':'')+'</div>'+
-   (m.lok_sabha_terms&&m.lok_sabha_terms.length?'<div>Lok Sabha terms: <b>'+esc(m.lok_sabha_terms.join(', '))+'</b> ('+m.terms_count+' term'+(m.terms_count==1?'':'s')+')</div>':(m.terms_count?'<div>Terms: <b>'+m.terms_count+'</b></div>':''))+
-   (m.term_label?'<div>Current: <b>'+esc(m.term_label)+'</b>'+(m.term_start?' · from '+esc(m.term_start):'')+(m.term_end?' until '+esc(m.term_end):'')+'</div>':'')+(m.elected_current?'<div>Elected: <b>'+esc(m.elected_current)+'</b></div>':'')+
-   (m.gender?'<div class="mut">'+esc(m.gender)+'</div>':'')+'</div></div>'+
-   (rows?'<h3>Attendance (current Lok Sabha)</h3>'+(m.minister_position?'<p class="mut">Ministers are not required to sign the attendance register, so no attendance is shown.</p>':'')+'<div class="wrap"><table><tr><th>Session<th>Period<th>Days signed<th>%</tr>'+rows+'</table></div>':(m.house==='Lok Sabha'?'<p class="mut">No attendance loaded yet — use “Attendance (Lok Sabha)”.</p>':''))+
-   (pos?'<h3>Positions held</h3><ul class="pos">'+pos+'</ul>':'<p class="mut">Positions held not loaded yet'+(m.details_fetched_at?'':' — use “Positions held” in step 1')+'.</p>')
- }catch(err){ box.innerHTML='<span class="chip bad">✗ '+esc(err.message)+'</span>' } };
-$('mdlClose').onclick=()=>$('mdl').classList.remove('open'); $('mdl').onclick=e=>{ if(e.target.id==='mdl') $('mdl').classList.remove('open') };
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') $('mdl').classList.remove('open') });
-$('reload').onclick=loadResults;
-
-// ---------- official list import ----------
-const HONS=/^(shri|smt|sri|dr|prof|adv|kumari|kum|sh|shrimati|capt|col|lt|gen|maj|er|ms|mr|mrs|sushri)\.?$/i;
-function cleanName(raw){ let s=(raw||'').replace(/\s+/g,' ').trim(); let parts=s.split(',').map(x=>x.trim()).filter(Boolean);
- const strip=t=>t.split(' ').filter(w=>!HONS.test(w)).join(' ').trim();
- if(parts.length>=2){ const last=strip(parts[0]); const first=strip(parts.slice(1).join(' ')); return (first+' '+last).replace(/\s+/g,' ').trim() }
- return strip(s) }
-function splitRows(text){ const lines=text.split(/\r?\n/).map(l=>l.replace(/ /g,' ')).filter(l=>l.trim());
- let rows=lines.map(l=>l.includes('\t')?l.split('\t'):(l.includes(',')&&l.split(',').length>=5?csvSplit(l):l.split(/\s{2,}/))).map(r=>r.map(c=>c.trim()).filter((c,i,a)=>c!==''||i<a.length));
- rows=rows.map(r=>r.filter(c=>c!=='')); const cnt={}; rows.forEach(r=>{ if(r.length>=3) cnt[r.length]=(cnt[r.length]||0)+1 });
- const modal=+Object.keys(cnt).sort((a,b)=>cnt[b]-cnt[a])[0]||0; return {rows:rows.filter(r=>r.length===modal),modal} }
-function csvSplit(l){ const out=[]; let cur='',q=false; for(const ch of l){ if(ch==='"') q=!q; else if(ch===','&&!q){out.push(cur);cur=''} else cur+=ch } out.push(cur); return out }
-let OFF={rows:[],modal:0};
-function guessCols(rows){ const n=rows[0].length; const g={name:-1,party:-1,seat:-1,state:-1,status:-1};
- const numFirst=rows.filter(r=>/^\d+$/.test(r[0])).length>rows.length*0.6; const off=numFirst?1:0;
- // name column: the one where most cells contain a comma or honorific
- let best=-1,sc=0; for(let c=0;c<n;c++){ const s=rows.filter(r=>/,|\b(shri|smt|dr|prof)\b/i.test(r[c]||'')).length; if(s>sc){sc=s;best=c} } g.name=best>=0?best:off;
- const rest=[]; for(let c=0;c<n;c++) if(c!==g.name&&!(numFirst&&c===0)) rest.push(c);
- const st=rest.find(c=>rows.filter(r=>/^(sitting|former)$/i.test((r[c]||'').trim())).length>rows.length*0.5); if(st!=null) g.status=st;
- const rest2=rest.filter(c=>c!==g.status); g.party=rest2[0]??-1; g.seat=rest2[1]??-1; g.state=rest2[2]??-1; return g }
-function showMap(){ const {rows}=OFF; if(!rows.length){ $('oMap').style.display='none'; return }
- $('oMap').style.display=''; $('oCount').textContent=rows.length; const g=guessCols(rows); const n=rows[0].length;
- const opt=(sel,none)=>(none?'<option value="-1">— none —</option>':'')+Array.from({length:n},(_,i)=>'<option value="'+i+'"'+(i===sel?' selected':'')+'>Col '+(i+1)+': '+esc((rows[0][i]||'').slice(0,18))+'</option>').join('');
- $('oSel').innerHTML=[['name','Name',false],['party','Party',true],['seat','Seat',true],['state','State',true],['status','Status',true]].map(([k,l,none])=>'<label class="mut">'+l+'<br><select data-k="'+k+'">'+opt(g[k],none)+'</select></label>').join('');
- $('oSel').querySelectorAll('select').forEach(s=>s.onchange=prevOff); prevOff() }
-function colMap(){ const m={}; $('oSel').querySelectorAll('select').forEach(s=>m[s.dataset.k]=+s.value); return m }
-function buildOfficial(){ const m=colMap(), sit=$('oSit').checked; const get=(r,i)=>i>=0?(r[i]||'').trim():''; const out=[];
- for(const r of OFF.rows){ const status=get(r,m.status); if(sit&&m.status>=0&&!/sitting/i.test(status)) continue;
-  const raw=get(r,m.name); if(/^(name|member|member name|name of member)$/i.test(raw)) continue; const name=cleanName(raw); if(!name||name.length<3) continue;
-  out.push({name,rawName:raw,party:get(r,m.party),constituency:get(r,m.seat),state:get(r,m.state),status}) } return out }
-function prevOff(){ const rows=buildOfficial(); $('oPrev').innerHTML='<tr><th>Name<th>Party<th>Seat<th>State<th>Status</tr>'+rows.slice(0,5).map(x=>'<tr><td>'+esc(x.name)+'<td>'+esc(x.party)+'<td>'+esc(x.constituency)+'<td>'+esc(x.state)+'<td>'+esc(x.status)+'</tr>').join('');
- $('oCount').textContent=rows.length+' (of '+OFF.rows.length+' rows)'; }
-function readOff(text){ clear($('oMsg')); OFF=splitRows(text); if(!OFF.rows.length){ $('oMap').style.display='none'; if(text.trim()) msg($('oMsg'),'bad','Could not find a table in that text. Select the whole members page (Select All), copy, and paste again.'); return } showMap() }
-$('opaste').addEventListener('input',()=>readOff($('opaste').value));
-$('ofile').onchange=async e=>{ const f=e.target.files[0]; if(f){ const t=await f.text(); $('opaste').value=t.slice(0,2e6); readOff(t) } };
-$('oBtn').onclick=()=>busy($('oBtn'),'Importing…',async()=>{ const rows=buildOfficial(); if(rows.length<5){ msg($('oMsg'),'bad','Too few rows ('+rows.length+'). Check the column choices above.'); throw 0 }
- msg($('oMsg'),'busy','Importing '+rows.length+' members… this can take up to a minute.');
- const r=await api('registry','POST','',{action:'official',house:$('oh').value,rows,mark_stale:$('oStale').checked});
- msg($('oMsg'),'ok','Imported <b>'+r.official_rows+'</b> '+esc(r.house)+' members. Matched existing: <b>'+r.matched+'</b> (by name '+r.matched_by.exact+', loose name '+r.matched_by.loose+', seat '+r.matched_by.seat+'). New: <b>'+r.inserted+'</b>. Marked former: <b>'+r.marked_former+'</b>'+(r.former_examples.length?' (e.g. '+esc(r.former_examples.join(', '))+')':'')+'.');
- loadResults() }).catch(e=>{ if(e) msg($('oMsg'),'bad',esc(e.message)) });
-
-
-// ---------- one-click official load ----------
-async function loadOfficial(house,btn){ const S=steps($('oSteps')); S.add('f','Reading the '+house+' list from sansad.in'); S.add('m','Matching with our database'); clear($('oLoadMsg'));
- try{ S.set('f','busy'); S.set('m','wait');
-  const r=await api('registry','POST','',{action:'official_fetch',house,mark_stale:true});
-  S.set('f','ok','Read '+r.official_rows+' sitting '+esc(house)+' members from sansad.in');
-  S.set('m','ok','Matched '+r.matched+' existing · added '+r.inserted+' new · marked '+r.marked_former+' older entries as former');
-  msg($('oLoadMsg'),'ok','<b>'+esc(house)+'</b> is up to date: '+r.official_rows+' current members.'+(r.former_examples&&r.former_examples.length?' Marked former, e.g. '+esc(r.former_examples.slice(0,4).join(', '))+'.':''));
-  loadResults();
- }catch(e){ S.set('f','bad','Could not read the list'); msg($('oLoadMsg'),'bad',esc(e.message)); throw e } }
-$('lsBtn').onclick=()=>busy($('lsBtn'),'Loading…',()=>loadOfficial('Lok Sabha')).catch(()=>{});
-$('rsBtn').onclick=()=>busy($('rsBtn'),'Loading…',()=>loadOfficial('Rajya Sabha')).catch(()=>{});
-
-// ---------- attendance + positions ----------
-$('attBtn').onclick=()=>busy($('attBtn'),'Loading…',async()=>{ const S=steps($('oSteps')); S.add('a','Reading attendance for every session of the 18th Lok Sabha'); S.set('a','busy'); clear($('oLoadMsg'));
- let r; try{ r=await api('registry','POST','',{action:'official_attendance'}) }catch(e){ S.set('a','busy','Retrying once…'); r=await api('registry','POST','',{action:'official_attendance'}) }
- S.set('a','ok','Attendance saved: '+r.sessions+' sessions, '+r.rows+' member records'); msg($('oLoadMsg'),'ok','Attendance is up to date.'); loadResults() }).catch(e=>{ if(e) msg($('oLoadMsg'),'bad',esc(e.message)) });
-let STOPPOS=false;
-async function loadPositions(house,btn){ const S=steps($('oSteps')); S.add('p','Positions held — '+house); S.set('p','busy'); clear($('oLoadMsg')); STOPPOS=false; let off=0,total=0,done=0,failed=0;
- const stop=document.createElement('button'); stop.className='ghost'; stop.textContent='■ Stop'; stop.onclick=()=>{STOPPOS=true;stop.textContent='Stopping…'}; btn.parentNode.appendChild(stop);
- try{ while(!STOPPOS){ const r=await api('registry','POST','',{action:'official_details',house,offset:off,limit:40}); total=r.total; done+=r.done; failed+=r.failed; off=r.next_offset;
-   S.set('p','busy','Positions held — '+house+': '+Math.min(off,total)+' of '+total+(failed?' ('+failed+' failed)':'')); if(r.finished) break }
-  S.set('p',off>=total?'ok':'busy','Positions held — '+house+': '+done+' members saved'+(off<total?' — stopped at '+off+' of '+total+'; press the button again to continue from the start of the list (already saved ones are refreshed)':'')+(failed?' · '+failed+' failed':''));
-  msg($('oLoadMsg'),off>=total?'ok':'busy',off>=total?'Positions held loaded for '+house+'.':'Stopped.'); loadResults();
- }finally{ stop.remove() } }
-$('posLsBtn').onclick=()=>busy($('posLsBtn'),'Loading…',()=>loadPositions('Lok Sabha',$('posLsBtn'))).catch(e=>{ if(e) msg($('oLoadMsg'),'bad',esc(e.message)) });
-$('posRsBtn').onclick=()=>busy($('posRsBtn'),'Loading…',()=>loadPositions('Rajya Sabha',$('posRsBtn'))).catch(e=>{ if(e) msg($('oLoadMsg'),'bad',esc(e.message)) });
-
-NN.setup({onReady:loadResults});
-</script></body></html>
+<script src="icons.js"></script>
+<script>document.getElementById('mark').innerHTML=ic('eye');document.getElementById('themeIc').innerHTML=ic('sun');</script>
+<script src="site.js"></script>
+</body>
+</html>

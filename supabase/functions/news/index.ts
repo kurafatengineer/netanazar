@@ -109,51 +109,66 @@ async function politicians() {
   if (polCache && Date.now() - polCache.at < 60000) return polCache.rows;
   const data: any[] = [];
   for (let from = 0; ; from += 1000) {   // Supabase returns at most 1000 rows per request
-    const { data: part } = await db.from('politicians').select('id,name_en,name_hi,name_variants,party').neq('is_current', false).order('id').range(from, from + 999);
+    const { data: part } = await db.from('politicians').select('id,name_en,name_hi,name_variants,party,constituency,state').neq('is_current', false).order('id').range(from, from + 999);
     data.push(...(part ?? [])); if (!part || part.length < 1000) break;
   }
   const rows = (data ?? []).map((p: any) => ({ ...p,
     variants: [p.name_en, p.name_hi, ...(p.name_variants ?? [])].filter(Boolean) }));
   polCache = { at: Date.now(), rows }; return rows;
 }
+let nameCount: Map<string, number> | null = null; let nameCountFor: any[] | null = null;
+function countNames(pols: any[]) {
+  if (nameCountFor === pols && nameCount) return nameCount;
+  const m = new Map<string, number>();
+  for (const p of pols) { const seen = new Set<string>(); for (const v of p.variants as string[]) { const k = norm(v).split(' ').filter((x) => !HON.has(x)).sort().join(' '); if (k && !seen.has(k)) { seen.add(k); m.set(k, (m.get(k) ?? 0) + 1); } } }
+  nameCount = m; nameCountFor = pols; return m;
+}
+// Mentions: full-name match. When several members share the same name, the article must also mention that member's seat or state.
 function findMentions(text: string, pols: any[]) {
-  const t = norm(text); const words = new Set(t.split(' ')); const out: any[] = [];
+  const t = norm(text); const words = new Set(t.split(' ')); const out: any[] = []; const counts = countNames(pols);
   for (const p of pols) {
     for (const v of p.variants as string[]) {
       const nv = norm(v); if (!nv) continue; let hit = false;
-      if (/[^\u0000-ɏ\s]/.test(nv)) hit = t.includes(nv);                       // Hindi etc.: substring
+      if (/[^\u0000-\u024f\s]/.test(nv)) hit = t.includes(nv);
       else {
         const w = nv.split(' ').filter((x) => !HON.has(x) && x.length > 1);
         if (w.length < 2 || !w.every((x) => words.has(x))) continue;
         for (const o of [w, [...w].reverse()])
           if (new RegExp('(?<![\\p{L}\\p{N}_])' + o.map(esc).join('\\s+(?:[\\p{L}\\p{N}_]+\\s+)?') + '(?![\\p{L}\\p{N}_])', 'u').test(t)) { hit = true; break; }
+        if (hit && (counts.get(nv.split(' ').filter((x) => !HON.has(x)).sort().join(' ')) ?? 1) > 1) {
+          const seat = norm(String(p.constituency ?? '').replace(/\((sc|st)\)/gi, '')); const st = norm(String(p.state ?? ''));
+          hit = (seat.length > 2 && t.includes(seat)) || (st.length > 2 && t.includes(st));
+        }
       }
-      if (hit) {
-        const i = text.toLowerCase().indexOf(v.toLowerCase().split(' ')[0]);
-        out.push({ politician_id: p.id, matched_variant: v, party_at_mention: p.party ?? null,
-          snippet: text.slice(Math.max(0, i - 120), i + 240).replace(/\s+/g, ' ') }); break;
-      }
+      if (hit) { out.push({ politician_id: p.id, matched_variant: v, party_at_mention: p.party ?? null }); break; }
     }
   }
   return out;
 }
 
-// ---- feed parsing (server-side fallback) ----
 function parseFeed(xml: string) {
-  const items: { url: string; title?: string }[] = [];
+  const items: { url: string; title?: string; published?: string }[] = [];
+  const dateOf = (blk: string) => {
+    const raw = blk.match(/<(?:pubDate|published|updated|dc:date)[^>]*>\s*([^<]+?)\s*<\/(?:pubDate|published|updated|dc:date)>/i)?.[1];
+    const d = raw ? new Date(raw) : null; return d && !isNaN(d.getTime()) ? d.toISOString() : undefined;
+  };
   for (const m of xml.matchAll(/<(item|entry)[\s>][\s\S]*?<\/\1>/gi)) {
     const blk = m[0];
     const link = blk.match(/<link[^>]*href="([^"]+)"/i)?.[1] ?? blk.match(/<link[^>]*>\s*(?:<!\[CDATA\[)?\s*([^<\s]+)/i)?.[1];
     const title = blk.match(/<title[^>]*>\s*(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?\s*<\/title>/i)?.[1];
-    if (link) items.push({ url: link, title: title?.trim() });
+    if (link) items.push({ url: link, title: title?.trim(), published: dateOf(blk) });
   }
-  for (const m of xml.matchAll(/<url>[\s\S]*?<loc>\s*([^<\s]+)\s*<\/loc>[\s\S]*?<\/url>/gi)) items.push({ url: m[1] });
+  for (const m of xml.matchAll(/<url>[\s\S]*?<loc>\s*([^<\s]+)\s*<\/loc>[\s\S]*?<\/url>/gi)) {
+    const lm = m[0].match(/<lastmod>\s*([^<]+?)\s*<\/lastmod>/i)?.[1]; const d = lm ? new Date(lm) : null;
+    items.push({ url: m[1], published: d && !isNaN(d.getTime()) ? d.toISOString() : undefined });
+  }
   return items;
 }
-async function ingest(items: { url: string; title?: string }[], sourceId: string | null) {
+async function ingest(items: { url: string; title?: string; published?: string }[], sourceId: string | null) {
   const seen = new Set<string>(); const rows: any[] = [];
   for (const it of items) { if (!/^https?:/i.test(it.url)) continue; const c = canonical(it.url); if (seen.has(c)) continue; seen.add(c);
-    rows.push({ url: c, canonical_url: c, source_id: sourceId, title: it.title ?? null, next_check_at: nowIso() }); }
+    const pd = it.published ? new Date(it.published) : null;
+    rows.push({ url: c, canonical_url: c, source_id: sourceId, title: it.title ?? null, published_at: pd && !isNaN(pd.getTime()) ? pd.toISOString() : null, next_check_at: nowIso() }); }
   let added = 0;
   for (let i = 0; i < rows.length; i += 200) {
     const { data } = await db.from('articles').upsert(rows.slice(i, i + 200), { onConflict: 'url', ignoreDuplicates: true }).select('id');
@@ -164,7 +179,7 @@ async function ingest(items: { url: string; title?: string }[], sourceId: string
 
 // ---- process due articles within a time budget ----
 async function processDue(limit: number, budgetMs: number, sourceId?: string) {
-  const t0 = Date.now(); const stats = { processed: 0, new: 0, changed: 0, same: 0, deleted: 0, unreachable: 0, skipped: 0, mentions: 0 };
+  const t0 = Date.now(); const stats = { processed: 0, new: 0, changed: 0, same: 0, deleted: 0, unreachable: 0, skipped: 0, mentions: 0, irrelevant: 0 };
   const pols = await politicians();
   const { data: srcs } = await db.from('sources').select('*'); const byId = new Map((srcs ?? []).map((s: any) => [s.id, s]));
   let dq = db.from('articles').select('*').lte('next_check_at', nowIso()).neq('status', 'deleted');
@@ -185,16 +200,20 @@ async function processDue(limit: number, budgetMs: number, sourceId?: string) {
     else if (r.status === 200) {
       const { title, body } = extract(r.text); const h = await sha256(title + '\n\n' + body);
       const base = { last_checked_at: ts, etag: r.headers.get('etag'), last_modified: r.headers.get('last-modified'), status: 'active', deleted_at: null, last_gone_at: null };
+      const ms = body ? findMentions(title + '\n' + body, pols) : [];
       if (!body) { stats.unreachable++; await db.from('articles').update({ last_checked_at: ts }).eq('id', a.id); }
+      else if (!ms.length && !a.current_hash) {   // no politician named: keep only the link record, nothing else
+        stats.irrelevant++; await db.from('articles').update({ status: 'irrelevant', last_checked_at: ts, next_check_at: null, title: title || a.title }).eq('id', a.id); continue;
+      }
       else if (a.current_hash === h) { stats.same++; await db.from('articles').update(base).eq('id', a.id); }
       else {
         const { data: prev } = await db.from('article_versions').select('version_no,body_text').eq('article_id', a.id).order('version_no', { ascending: false }).limit(1);
         const vno = (prev?.[0]?.version_no ?? 0) + 1;
+        const diff = prev?.[0] ? lineDiff(prev[0].body_text ?? '', body) : null;
         await db.from('article_versions').insert({ article_id: a.id, version_no: vno, title, body_text: body, content_hash: h,
-          diff_from_previous: prev?.[0] ? lineDiff(prev[0].body_text ?? '', body) : null });
+          diff_from_previous: diff, added_lines: diff ? diff.added.length : null, removed_lines: diff ? diff.removed.length : null });
         await db.from('articles').update({ ...base, title, current_hash: h }).eq('id', a.id);
         changed = vno > 1; if (changed) stats.changed++; else stats.new++;
-        const ms = findMentions(title + '\n' + body, pols);
         if (ms.length) { stats.mentions += ms.length;
           await db.from('mentions').upsert(ms.map((m) => ({ article_id: a.id, ...m })), { onConflict: 'article_id,politician_id', ignoreDuplicates: true }); }
       }
@@ -218,7 +237,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (req.method === 'GET') {
       const a = url.searchParams.get('action');
-      if (a === 'sources') { const { data } = await db.from('sources').select('id,domain,name,rss_urls,sitemap_url,is_blocked'); return json({ rows: data }); }
+      if (a === 'sources') { const { data } = await db.from('sources').select('id,domain,name,rss_urls,sitemap_url,is_blocked,min_delay_seconds').order('name'); return json({ rows: data }); }
       if (a === 'articles') {
         const { data } = await db.from('articles').select('id,title,url,status,first_seen_at,deleted_at,last_checked_at,article_versions(count),mentions(politician_id,party_at_mention,politicians(name_en))')
           .order('first_seen_at', { ascending: false }).limit(200);
@@ -228,6 +247,14 @@ Deno.serve(async (req) => {
         const id = url.searchParams.get('id')!;
         const { data } = await db.from('article_versions').select('version_no,title,body_text,captured_at').eq('article_id', id).order('version_no');
         return json({ rows: data });
+      }
+      if (a === 'overview') {
+        const c = async (f: (q: any) => any) => { const { count } = await f(db.from('articles').select('id', { count: 'exact', head: true })); return count ?? 0; };
+        const { count: mentions } = await db.from('mentions').select('id', { count: 'exact', head: true });
+        const { count: versions } = await db.from('article_versions').select('id', { count: 'exact', head: true });
+        return json({ articles: { relevant: await c((q) => q.in('status', ['active', 'deleted', 'unreachable']).not('current_hash', 'is', null)),
+          waiting: await c((q) => q.lte('next_check_at', nowIso()).neq('status', 'deleted')), irrelevant: await c((q) => q.eq('status', 'irrelevant')),
+          deleted: await c((q) => q.eq('status', 'deleted')) }, mentions: mentions ?? 0, versions: versions ?? 0 });
       }
       if (a === 'stats') {
         const { data } = await db.from('fetch_log').select('url,fetched_at').gte('fetched_at', new Date(Date.now() - 864e5).toISOString()).limit(20000);
@@ -247,6 +274,13 @@ Deno.serve(async (req) => {
       }
       return json({ added: await ingest(items, s.id), found: items.length });
     }
+    if (b.action === 'add_source') {
+      const rss = String(b.rss_url ?? '').trim(); let host = ''; try { host = new URL(rss).host.replace(/^www\./, ''); } catch { return json({ error: 'Enter a valid RSS address starting with https://' }, 400); }
+      const row = { domain: String(b.domain ?? host).trim().toLowerCase(), name: String(b.name ?? host).trim(), rss_urls: [rss], min_delay_seconds: 3, is_blocked: false };
+      const { data, error } = await db.from('sources').upsert(row, { onConflict: 'domain' }).select('id').single();
+      return error ? json({ error: error.message }, 500) : json({ id: data.id });
+    }
+    if (b.action === 'unblock_source') { await db.from('sources').update({ is_blocked: false }).eq('id', b.source_id); return json({ ok: true }); }
     if (b.action === 'process') return json(await processDue(Math.min(b.limit ?? 30, 60), 100000, b.source_id ?? undefined));
     return json({ error: 'unknown action' }, 400);
   } catch (e) { return json({ error: String((e as Error).message ?? e) }, 500); }

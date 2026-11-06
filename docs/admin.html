@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>NetaNazar · Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,500&family=Noto+Sans+Devanagari:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="site.css">
+<style>
+ .admin{max-width:860px;margin:0 auto;padding:8px 20px 40px}
+ h1.t{font:500 clamp(28px,4vw,38px)/1.1 var(--f-display);letter-spacing:-.02em;margin:26px 0 4px}
+ .lead{color:var(--ink-2);margin:0 0 22px}
+ .field-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+ .in{height:46px;padding:0 14px;border:1px solid var(--line);border-radius:12px;background:var(--sunk);color:var(--ink);font:500 15px var(--f-ui);min-width:0;flex:1}
+ .in:focus{outline:0;border-color:var(--accent);background:var(--surface);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent)}
+ .hero-card{padding:26px;background:linear-gradient(135deg,var(--surface),color-mix(in srgb,var(--surface) 72%,var(--accent-soft)));box-shadow:var(--shadow-2)}
+ .go{height:60px;padding:0 30px;border-radius:18px;font-size:18px;gap:12px}
+ .go .ic{font-size:22px} .go:disabled{opacity:.7;cursor:wait}
+ .ghostbtn{height:60px;padding:0 20px;border-radius:18px;background:var(--sunk);font-weight:650}
+ .stages{margin-top:22px}
+ .stage{display:flex;gap:14px;align-items:flex-start;padding:14px 0;border-top:1px solid var(--line)}
+ .stage:first-child{border-top:0}
+ .si{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;flex:none;background:var(--sunk);color:var(--muted);font-size:18px;margin-top:2px}
+ .stage.run .si{background:var(--warn-soft);color:var(--warn)} .stage.ok .si{background:var(--ok-soft);color:var(--ok)} .stage.bad .si{background:var(--off-soft);color:var(--off)} .stage.skip{opacity:.55}
+ .sb{flex:1;min-width:0} .sn{font-weight:650} .sd{font-size:14px;color:var(--ink-2);margin-top:2px;word-break:break-word}
+ .stage .bar{margin:10px 0 0;height:6px;display:none} .stage.run .bar{display:block} .stage .bar i{background:var(--accent);width:0;transition:width .3s}
+ .chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);margin-top:6px;cursor:pointer;user-select:none}
+ .chk input{width:18px;height:18px;accent-color:var(--accent)}
+ .lanes{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px;margin-top:12px}
+ .lane{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--sunk);border-radius:12px;font-size:13px}
+ .lane .li{flex:none;margin-top:1px} .lane b{font-weight:650} .lane small{display:block;color:var(--muted)}
+ .lane.ok .li{color:var(--ok)} .lane.bad .li{color:var(--off)} .lane.run .li{color:var(--warn)}
+ .msgbar{margin-top:16px;padding:12px 14px;border-radius:14px;font-size:14.5px;display:none}
+ .msgbar.show{display:block} .msgbar.ok{background:var(--ok-soft);color:var(--ok)} .msgbar.bad{background:var(--off-soft);color:var(--off)} .msgbar.info{background:var(--accent-soft);color:var(--accent)}
+ .grid4{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+ .stat{padding:14px 16px;background:var(--sunk);border-radius:16px} .stat b{display:block;font:500 30px/1.1 var(--f-display)} .stat span{font-size:13px;color:var(--ink-2)}
+ table.srctbl{width:100%;border-collapse:collapse;font-size:14px} table.srctbl td{padding:10px 6px;border-top:1px solid var(--line);vertical-align:middle} table.srctbl tr:first-child td{border-top:0}
+ .mini{height:32px;padding:0 12px;border-radius:10px;background:var(--sunk);font-weight:600;font-size:13px} .mini:hover{background:var(--line)}
+ .sp{width:16px;height:16px;border:2.5px solid currentColor;border-right-color:transparent;border-radius:50%;display:inline-block;animation:r .8s linear infinite}
+ @keyframes r{to{transform:rotate(360deg)}}
+ details summary{cursor:pointer;color:var(--ink-2);font-size:14px}
+ #log{white-space:pre-wrap;font:12.5px/1.5 ui-monospace,Menlo,monospace;color:var(--ink-2);max-height:260px;overflow:auto;margin-top:10px;background:var(--sunk);border-radius:12px;padding:12px}
+</style>
+</head>
+<body>
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="index.html"><span class="mark" id="mark"></span><span>NetaNazar</span><span class="chip sand" style="margin-left:6px">Admin</span></a>
+  <div class="spacer"></div><a class="chip" href="index.html" style="text-decoration:none">View public site</a>
+  <button class="iconbtn" id="themeBtn" aria-label="Switch light or dark theme"><span id="themeIc"></span></button>
+</div></header>
+
+<main class="admin">
+  <h1 class="t">Update the data</h1>
+  <p class="lead">One click refreshes members, attendance, positions and news. Run it as often as you like — it only changes what changed.</p>
+
+  <section class="card" id="conn">
+    <h3><span id="cIc"></span> Connection</h3>
+    <div class="field-row"><input class="in" id="tok" type="password" autocomplete="off" placeholder="Admin token" aria-label="Admin token"><button class="btn" id="tokSave" style="display:none">Save</button><span class="chip" id="tokChip">Not set</span></div>
+    <details style="margin-top:10px"><summary>Advanced: function address</summary><div class="field-row" style="margin-top:8px"><input class="in" id="base" aria-label="Function address"></div></details>
+  </section>
+
+  <section class="card hero-card">
+    <div class="field-row"><button class="btn go" id="go"></button><button class="ghostbtn" id="stop" style="display:none"></button>
+      <span class="fine" id="last" style="margin:0 0 0 auto"></span></div>
+    <div class="stages" id="stages"></div>
+    <div class="msgbar" id="msg"></div>
+  </section>
+
+  <section class="card"><h3><span id="sIc"></span> At a glance</h3><div class="grid4" id="stats"><div class="skel" style="height:70px"></div></div></section>
+
+  <section class="card"><h3><span id="nIc"></span> News sources</h3>
+    <table class="srctbl" id="srcTbl"></table>
+    <div class="field-row" style="margin-top:14px"><input class="in" id="newName" placeholder="Name, e.g. Dainik Bhaskar" aria-label="Source name" style="flex:1 1 180px"><input class="in" id="newRss" placeholder="RSS address, https://…" aria-label="RSS address" style="flex:2 1 260px"><button class="btn ghost" id="addSrc"></button></div>
+    <div class="fine">Sites that block our server are paused automatically (“Blocked”). We never try to get around a block.</div>
+  </section>
+
+  <section class="card"><details><summary>Run log</summary><div id="log">Nothing yet.</div></details></section>
+</main>
+
+<script src="icons.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
