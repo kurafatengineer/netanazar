@@ -75,3 +75,15 @@ def test_fetcher_politeness_robots_and_blocking():
     assert any(s > 0 for s in sleeps)  # delay enforced between requests
     for i in range(3): f.get(f"https://blk.com/{i}")
     assert "blk.com" in f.blocked and f.get("https://blk.com/z").skipped == "blocked"
+
+
+def test_registry_name_matching():
+    from netanazar.registry import check_page, name_in_text, norm
+    pols = [{"id": "1", "name_en": "Narendra Modi", "name_hi": "नरेंद्र मोदी"},
+            {"id": "2", "name_en": "Rahul Gandhi", "name_hi": None},
+            {"id": "3", "name_en": "Amit Shah", "name_hi": None}]
+    text = "Members: Modi, Narendra (BJP); Shri Rahul V. Gandhi (INC); Dr. Someone Else"
+    r = check_page(pols, text)
+    assert r == {"1": True, "2": True, "3": False}
+    assert check_page(pols, "सूची: नरेंद्र मोदी")["1"]
+    assert not name_in_text("Amit", None, norm("amit shah"), "")  # single name never matches
