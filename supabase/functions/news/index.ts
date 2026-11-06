@@ -109,7 +109,7 @@ async function politicians() {
   if (polCache && Date.now() - polCache.at < 60000) return polCache.rows;
   const data: any[] = [];
   for (let from = 0; ; from += 1000) {   // Supabase returns at most 1000 rows per request
-    const { data: part } = await db.from('politicians').select('id,name_en,name_hi,name_variants,party').order('id').range(from, from + 999);
+    const { data: part } = await db.from('politicians').select('id,name_en,name_hi,name_variants,party').neq('is_current', false).order('id').range(from, from + 999);
     data.push(...(part ?? [])); if (!part || part.length < 1000) break;
   }
   const rows = (data ?? []).map((p: any) => ({ ...p,

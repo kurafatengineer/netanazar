@@ -18,6 +18,57 @@ async function all(table: string, cols: string): Promise<any[]> {
   return out;
 }
 
+
+// ---- official list import (Lok Sabha / Rajya Sabha members from sansad.in) ----
+const HONS = new Set(['shri', 'smt', 'sri', 'dr', 'prof', 'adv', 'kumari', 'kum', 'sh', 'shrimati', 'capt', 'col', 'lt', 'gen', 'maj', 'er', 'ms', 'mr', 'mrs', 'sushri', 'late']);
+const toks = (s: string) => norm(s).split(' ').filter((t) => t && !HONS.has(t));
+const keyAll = (s: string) => toks(s).sort().join(' ');
+const keyLoose = (s: string) => { const t = toks(s).filter((x) => x.length > 1).sort(); return t.length >= 2 ? t.join(' ') : ''; };
+const seatKey = (s: string) => norm((s || '').replace(/\((sc|st)\)/ig, ' ').replace(/lok sabha constituency|assembly constituency|constituency/ig, ' '));
+
+async function importOfficial(house: string, rows: any[], markStale: boolean) {
+  const existing = (await all('politicians', 'id,name_en,name_variants,house,constituency,state,source,is_current')).filter((p) => p.house === house);
+  const exact = new Map<string, any>(), loose = new Map<string, any>(), seat = new Map<string, any[]>();
+  for (const p of existing) {
+    for (const n of [p.name_en, ...(p.name_variants ?? [])].filter(Boolean)) {
+      exact.set(keyAll(n), p); const kl = keyLoose(n); if (kl) loose.set(kl, p);
+    }
+    if (p.constituency) { const k = seatKey(p.constituency); if (k) seat.set(k, [...(seat.get(k) ?? []), p]); }
+  }
+  const used = new Set<string>(); const updates: { id: string; v: Record<string, unknown> }[] = []; const fresh: Record<string, unknown>[] = [];
+  const how = { exact: 0, loose: 0, seat: 0 };
+  for (const r of rows) {
+    const name = String(r.name ?? '').trim(); if (!name) continue;
+    let cur = exact.get(keyAll(name)); let m: 'exact' | 'loose' | 'seat' = 'exact';
+    if (!cur || used.has(cur.id)) { cur = loose.get(keyLoose(name)); m = 'loose'; }
+    if ((!cur || used.has(cur.id)) && r.constituency) {
+      const c = (seat.get(seatKey(r.constituency)) ?? []).filter((p) => !used.has(p.id) && (!p.state || !r.state || norm(p.state) === norm(r.state)));
+      cur = c.length === 1 ? c[0] : undefined; m = 'seat';
+    }
+    const v: Record<string, unknown> = { name_en: name, house, source: 'official', is_current: true, imported_at: new Date().toISOString() };
+    if (r.party) v.party = r.party; if (r.constituency) v.constituency = r.constituency; if (r.state) v.state = r.state; if (r.status) v.official_status = r.status;
+    if (cur && !used.has(cur.id)) {
+      used.add(cur.id); how[m]++;
+      const variants = new Set<string>([...(cur.name_variants ?? [])]); if (cur.name_en && norm(cur.name_en) !== norm(name)) variants.add(cur.name_en);
+      if (r.rawName && norm(r.rawName) !== norm(name)) variants.add(String(r.rawName));
+      v.name_variants = [...variants]; updates.push({ id: cur.id, v });
+    } else { if (r.rawName && norm(r.rawName) !== norm(name)) v.name_variants = [String(r.rawName)]; fresh.push(v); }
+  }
+  for (let i = 0; i < updates.length; i += 20) {
+    await Promise.all(updates.slice(i, i + 20).map((u) => db.from('politicians').update(u.v).eq('id', u.id)));
+  }
+  for (let i = 0; i < fresh.length; i += 200) {
+    const { error } = await db.from('politicians').insert(fresh.slice(i, i + 200)); if (error) throw new Error(error.message);
+  }
+  let stale = 0; const staleSample: string[] = [];
+  if (markStale && rows.length >= 20) {
+    const old = existing.filter((p) => !used.has(p.id) && p.source !== 'official' && p.is_current !== false);
+    for (let i = 0; i < old.length; i += 100) await db.from('politicians').update({ is_current: false }).in('id', old.slice(i, i + 100).map((p) => p.id));
+    stale = old.length; staleSample.push(...old.slice(0, 8).map((p) => p.name_en));
+  }
+  return { house, official_rows: rows.length, matched: used.size, matched_by: how, inserted: fresh.length, marked_former: stale, former_examples: staleSample };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
   const token = (Deno.env.get('REGISTRY_TOKEN') ?? '').trim();
@@ -27,7 +78,7 @@ Deno.serve(async (req) => {
     const url = new URL(req.url);
     if (req.method === 'GET') {
       const action = url.searchParams.get('action');
-      if (action === 'politicians') return json({ rows: await all('politicians', 'id,name_en,name_hi,party,house,constituency,wikidata_id') });
+      if (action === 'politicians') return json({ rows: await all('politicians', 'id,name_en,name_hi,party,house,constituency,state,wikidata_id,is_current,source') });
       if (action === 'checks') return json({ rows: await all('registry_checks', 'id,politician_id,source,found') });
       return json({ error: 'unknown action' }, 400);
     }
@@ -50,6 +101,10 @@ Deno.serve(async (req) => {
         if (error) return json({ error: error.message }, 500);
       }
       return json({ inserted: fresh.length, updated });
+    }
+    if (body.action === 'official') {
+      if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
+      return json(await importOfficial(body.house, body.rows ?? [], body.mark_stale !== false));
     }
     if (body.action === 'checks') {
       const rows = Object.entries(body.results as Record<string, boolean>).map(([pid, found]) => ({ politician_id: pid, source: body.source, found }));
