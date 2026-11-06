@@ -37,14 +37,15 @@ const SOURCES={loksabha:['Lok Sabha','https://sansad.in/ls/members'],rajyasabha:
 eci:['ECI','https://results.eci.gov.in/'],myneta:['MyNeta','https://www.myneta.info/'],prs:['PRS','https://prsindia.org/mptrack'],delhi:['Delhi Assembly','https://delhiassembly.delhi.gov.in/']};
 const Q={'Lok Sabha':['member of the 18th Lok Sabha'],'Rajya Sabha':['member of the Rajya Sabha'],'State Assembly':['member of the Delhi Legislative Assembly']};
 const $=id=>document.getElementById(id), log=t=>$('log').textContent=t;
-const cfg=()=>({fn:localStorage.getItem('nn_fn')||'',tok:localStorage.getItem('nn_tok')||''});
-$('fn').value=cfg().fn||'https://qajsvaeamujtpdsutzgo.supabase.co/functions/v1/registry'; $('tok').value=cfg().tok;
-function saveCfg(){localStorage.setItem('nn_fn',$('fn').value.trim());localStorage.setItem('nn_tok',$('tok').value);log('Saved.');loadResults()}
+const cfg=()=>({fn:($('fn').value||localStorage.getItem('nn_fn')||'').trim(),tok:($('tok').value||localStorage.getItem('nn_tok')||'').trim()});
+const saved=k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}};
+$('fn').value=saved('nn_fn')||'https://qajsvaeamujtpdsutzgo.supabase.co/functions/v1/registry'; $('tok').value=saved('nn_tok');
+function saveCfg(){localStorage.setItem('nn_fn',$('fn').value.trim());localStorage.setItem('nn_tok',$('tok').value.trim());log('Saved.');loadResults()}
 for(const [k,[n,u]] of Object.entries(SOURCES)) $('src').add(new Option(n,k));
 $('src').onchange=()=>$('u').value=SOURCES[$('src').value][1]; $('u').value=SOURCES.loksabha[1];
 async function api(method,qs,body){const c=cfg();
  const r=await fetch(c.fn+(qs||''),{method,headers:{'x-token':c.tok,'content-type':'application/json'},body:body&&JSON.stringify(body)});
- if(!r.ok) throw new Error('server '+r.status); return r.json()}
+ if(r.status===403) throw new Error('403: token does not match the one saved in Supabase (Edge Functions > Secrets > REGISTRY_TOKEN)'); if(!r.ok) throw new Error('server '+r.status); return r.json()}
 
 const HON=new Set('shri smt dr prof sri shrimati mr mrs ms adv capt col gen'.split(' '));
 const norm=s=>(s||'').normalize('NFC').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
