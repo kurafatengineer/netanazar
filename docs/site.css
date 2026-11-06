@@ -76,11 +76,24 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 .sg .badge{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;background:var(--sunk);color:var(--ink-2);font-size:19px}
 .sg .go{color:var(--muted)}
 
-/* ---------- avatar ---------- */
-.av{position:relative;display:inline-grid;place-items:center;border-radius:50%;background:var(--sunk);color:var(--ink-2);font-weight:650;flex:none;overflow:hidden;--ring:transparent;box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--ring)}
-.av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 20%}
-.av-s{width:36px;height:36px;font-size:13px} .av-m{width:48px;height:48px;font-size:16px} .av-l{width:112px;height:112px;font-size:36px;box-shadow:0 0 0 4px var(--surface),0 0 0 7px var(--ring)}
-.ring-ok{--ring:var(--ok)} .ring-off{--ring:var(--off)}
+/* ---------- avatar = an ID badge: ring = party colour, badge = active / former, pill = party ---------- */
+.idav{position:relative;display:inline-block;flex:none;--party:var(--accent);--pc:var(--party);--pf:#fff;line-height:0}
+.idav .face{position:relative;display:grid;place-items:center;border-radius:50%;background:var(--sunk);color:var(--ink-2);font-weight:650;overflow:hidden;line-height:1;
+  box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--pc)}
+.idav .face img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 20%}
+.idav .st{position:absolute;display:grid;place-items:center;border-radius:50%;color:#fff;background:var(--ok);box-shadow:0 0 0 2px var(--surface)}
+.idav .st .ic{width:62%;height:62%}
+.idav .pill{position:absolute;left:50%;bottom:0;transform:translate(-50%,50%);white-space:nowrap;border-radius:999px;background:var(--pc);color:var(--pf);font:700 12px/1 var(--f-ui);letter-spacing:.02em;box-shadow:0 0 0 3px var(--surface)}
+.idav-s .face{width:36px;height:36px;font-size:13px} .idav-s .st{width:14px;height:14px;right:-3px;bottom:-3px}
+.idav-m .face{width:48px;height:48px;font-size:16px} .idav-m .st{width:17px;height:17px;right:-4px;bottom:-4px}
+.idav-l{margin-bottom:12px} .idav-l .face{width:112px;height:112px;font-size:36px;box-shadow:0 0 0 4px var(--surface),0 0 0 7px var(--pc)}
+.idav-l .st{width:32px;height:32px;right:-2px;top:-2px;box-shadow:0 0 0 3px var(--surface)}
+.idav-l .pill{padding:6px 12px;font-size:13px}
+.idav.off{--pc:var(--off)} .idav.off .face img{filter:grayscale(.9) contrast(.95)} .idav.off .st{background:var(--off)}
+.idav.off .pill{background:var(--surface);color:var(--off);box-shadow:0 0 0 3px var(--surface),inset 0 0 0 2px var(--off)}
+.legend{display:flex;gap:6px 16px;flex-wrap:wrap;justify-content:center;margin-top:16px;font-size:13px;color:var(--ink-2)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend .k{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;color:#fff;background:var(--ok);font-size:10px} .legend .k.off{background:var(--off)} .legend .k .ic{width:70%;height:70%}
 
 /* ---------- chips ---------- */
 .chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:999px;background:var(--sunk);color:var(--ink-2);font:550 12.5px var(--f-ui);white-space:nowrap}
@@ -109,7 +122,7 @@ a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 .page-head h1{font:500 clamp(26px,4vw,38px)/1.1 var(--f-display);margin:0;letter-spacing:-.02em}
 .page-head .sub{color:var(--ink-2);font-size:15px}
 .list{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-l);box-shadow:var(--shadow-1);overflow:hidden}
-.row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 18px}
+.row{display:flex;align-items:center;gap:14px;width:100%;text-align:left;padding:12px 18px;color:var(--ink)} .row:hover{text-decoration:none}
 .row+.row{border-top:1px solid var(--line)}
 .row:hover{background:var(--accent-soft)}
 .row .t{flex:1;min-width:0} .row .n{font-weight:600} .row .n small{font-weight:400;color:var(--muted);margin-left:8px}

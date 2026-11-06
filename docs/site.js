@@ -45,9 +45,23 @@
   const isMP = (m) => m.house === 'Lok Sabha' || m.house === 'Rajya Sabha';
   const roleOf = (m) => m.is_current === false ? (isMP(m) ? 'Former MP' : 'Former MLA') : (isMP(m) ? 'Sitting MP' : 'MLA');
   const seatOf = (m) => m.constituency || m.state || '';
+  // ---- party colours (recognisable, not official logos); unknown parties get a stable colour from their name ----
+  const PARTY_COLORS = { BJP: '#F47216', INC: '#19A7E0', AITC: '#1EA84A', TMC: '#1EA84A', DMK: '#D8232A', AIADMK: '#0B7A3E', SP: '#D6262C', AAP: '#0A66C2', BSP: '#2243A3', TDP: '#E5B800', JDU: '#0E8A43', JDS: '#2A8F4A', SS: '#F28C28',
+    SHSUBT: '#F28C28', NCP: '#0D6EB8', NCPSP: '#0D6EB8', CPIM: '#C8102E', CPI: '#D62839', RJD: '#0F8A3E', YSRCP: '#1D63C9', BJD: '#17A34A', BRS: '#E2539F', TRS: '#E2539F', IUML: '#1E9E4A', JMM: '#1F8F3A', LJPRV: '#2AA7E0', LJP: '#2AA7E0',
+    AIMIM: '#0B7D3E', IND: '#6B7280', NOM: '#6B7280', SAD: '#1D4F9C', JKNC: '#C8102E', NC: '#C8102E', RLD: '#2D7D32', AGP: '#2E7D32', HAMS: '#F57C00', JSP: '#D32F2F' };
+  const partyKey = (p) => String(p || '').toUpperCase().replace(/[^A-Z]/g, '');
+  function partyStyle(p) {
+    const key = partyKey(p); let hex = PARTY_COLORS[key];
+    if (!hex) { let h = 0; for (const c of key || 'x') h = (h * 31 + c.charCodeAt(0)) % 360; const f = (n) => { const a = 0.5 * Math.min(0.5, 1 - 0.5), k = (n + h / 30) % 12; const v = 0.5 - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); return Math.round(255 * v).toString(16).padStart(2, '0'); }; hex = '#' + f(0) + f(8) + f(4); }
+    const n = parseInt(hex.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+    return { bg: hex, fg: lum > 0.62 ? '#14182b' : '#ffffff' };
+  }
+  const partyShort = (p) => { const t = String(p || '').trim(); if (!t) return 'IND'; if (t.length <= 8) return t; return t.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 6); };
   function avatar(m, size) {
-    const ring = m.is_current === false ? 'ring-off' : 'ring-ok';
-    return `<span class="av av-${size} ${ring}" title="${esc(roleOf(m))}">${esc(initials(m.name_en))}${m.photo_url ? `<img loading="lazy" referrerpolicy="no-referrer" alt="" src="${esc(m.photo_url)}" onerror="this.remove()">` : ''}</span>`;
+    const off = m.is_current === false, ps = partyStyle(m.party);
+    const status = off ? 'Former member' : (isMP(m) ? 'Active — sitting MP' : 'Active — MLA');
+    const tip = `${status}${m.party ? ' · ' + m.party : ''}`;
+    return `<span class="idav idav-${size} ${off ? 'off' : 'on'}" style="--party:${ps.bg};--pf:${ps.fg}" title="${esc(tip)}" role="img" aria-label="${esc(m.name_en + ': ' + tip)}"><span class="face">${esc(initials(m.name_en))}${m.photo_url ? `<img loading="lazy" referrerpolicy="no-referrer" alt="" src="${esc(m.photo_url)}" onerror="this.remove()">` : ''}</span><span class="st">${ic(off ? 'x' : 'check')}</span>${size === 'l' ? `<span class="pill">${esc(partyShort(m.party))}${off ? ' · former' : ''}</span>` : ''}</span>`;
   }
   const fmtDay = (iso) => {
     const d = new Date(iso + 'T00:00:00+05:30'); const today = new Date(new Date().toLocaleString('en-US', { timeZone: IST })); today.setHours(0, 0, 0, 0);
@@ -77,7 +91,7 @@
     scored.sort((a, b) => a[0] - b[0] || a[1].name_en.localeCompare(b[1].name_en)); out.members = scored.slice(0, 6).map((x) => x[1]);
     out.parties = [...PARTIES.entries()].filter(([p]) => nz(p).includes(qn)).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, n]) => ({ name, n }));
     out.seats = [...SEATS.filter((s) => s.k.includes(qn)).slice(0, 4).map((s) => ({ kind: 'seat', name: s.name, sub: s.m.name_en + ' · ' + (s.m.state || '') })),
-      ...STATES.filter((s) => s.k.includes(qn)).slice(0, 2).map((s) => ({ kind: 'state', name: s.name, sub: s.n + ' members' }))].slice(0, 5);
+      ...STATES.filter((s) => s.k.includes(qn)).slice(0, 2).map((s) => ({ kind: 'state', name: s.name, sub: s.n + ' member' + (s.n === 1 ? '' : 's') }))].slice(0, 5);
     return out;
   }
   function mountSearch(host, compact) {
@@ -90,7 +104,7 @@
       const mk = (cls, html, href) => { items.push({ href }); return `<button class="sg" role="option" data-i="${items.length - 1}">${html}</button>`; };
       let h = '';
       if (s.members.length) { h += `<div class="sg-label">${s.trending ? 'In the news this week' : 'Members'}</div>` + s.members.map((m) => mk('', `${avatar(m, 's')}<span class="t"><div class="n">${esc(m.name_en)}${m.name_hi ? ` <span style="font-weight:400;color:var(--muted)">${esc(m.name_hi)}</span>` : ''}</div><div class="s">${esc(m.party || '')} · ${esc(seatOf(m))}${m.is_current === false ? ' · Former' : ''}</div></span><span class="go">${ic('caret-right')}</span>`, '#/m/' + m.id)).join(''); }
-      if (s.parties.length) { h += '<div class="sg-label">Parties</div>' + s.parties.map((p) => mk('', `<span class="badge">${ic('flag')}</span><span class="t"><div class="n">${esc(p.name)}</div><div class="s">${p.n} sitting members</div></span><span class="go">${ic('caret-right')}</span>`, '#/party/' + encodeURIComponent(p.name))).join(''); }
+      if (s.parties.length) { h += '<div class="sg-label">Parties</div>' + s.parties.map((p) => mk('', `<span class="badge">${ic('flag')}</span><span class="t"><div class="n">${esc(p.name)}</div><div class="s">${p.n} sitting member${p.n === 1 ? '' : 's'}</div></span><span class="go">${ic('caret-right')}</span>`, '#/party/' + encodeURIComponent(p.name))).join(''); }
       if (s.seats.length) { h += '<div class="sg-label">Constituencies &amp; states</div>' + s.seats.map((p) => mk('', `<span class="badge">${ic('map-pin')}</span><span class="t"><div class="n">${esc(p.name)}</div><div class="s">${esc(p.sub)}</div></span><span class="go">${ic('caret-right')}</span>`, '#/' + p.kind + '/' + encodeURIComponent(p.name))).join(''); }
       if (!h) h = `<div class="empty" style="padding:20px">${ic('magnifying-glass')}<div>No member, party or constituency found for “${esc(input.value)}”.</div></div>`;
       box.innerHTML = h; box.hidden = false; input.setAttribute('aria-expanded', 'true'); idx = -1;
@@ -119,7 +133,7 @@
     setTitle(''); const cur = MEM.filter((m) => m.is_current !== false);
     const ls = cur.filter((m) => m.house === 'Lok Sabha').length, rs = cur.filter((m) => m.house === 'Rajya Sabha').length;
     view.innerHTML = `<section class="hero"><div class="wrap"><h1>Know your <em>MP</em>.</h1><div id="heroSearch"></div>
-      ${cur.length ? `<div class="stats"><span>${ic('users')} <b class="tnum">${cur.length}</b> sitting members</span><span>${ic('bank')} <b class="tnum">${ls}</b> Lok Sabha</span><span>${ic('buildings')} <b class="tnum">${rs}</b> Rajya Sabha</span>${UPDATED ? `<span>${ic('clock')} Updated ${esc(new Date(UPDATED).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: IST }))}</span>` : ''}</div>` : ''}</div></section>
+      ${cur.length ? `<div class="stats"><span>${ic('users')} <b class="tnum">${cur.length}</b> sitting members</span><span>${ic('bank')} <b class="tnum">${ls}</b> Lok Sabha</span><span>${ic('buildings')} <b class="tnum">${rs}</b> Rajya Sabha</span>${UPDATED ? `<span>${ic('clock')} Updated ${esc(new Date(UPDATED).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: IST }))}</span>` : ''}</div><div class="legend"><span><i class="k">${ic('check')}</i> Active</span><span><i class="k off">${ic('x')}</i> Former</span><span>Ring colour = party</span></div>` : ''}</div></section>
       <div class="wrap" id="homeBody"></div>`;
     const inp = mountSearch($('#heroSearch'), false); if (matchMedia('(min-width:700px)').matches) inp.focus({ preventScroll: true });
     const body = $('#homeBody');
