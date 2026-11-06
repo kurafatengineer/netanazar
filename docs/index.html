@@ -35,7 +35,11 @@ If a site refuses to be read by another web page, the box below lets you paste t
 <script>
 const SOURCES={loksabha:['Lok Sabha','https://sansad.in/ls/members'],rajyasabha:['Rajya Sabha','https://rajyasabha.nic.in/Members/Alphabetical'],
 eci:['ECI','https://results.eci.gov.in/'],myneta:['MyNeta','https://www.myneta.info/'],prs:['PRS','https://prsindia.org/mptrack'],delhi:['Delhi Assembly','https://delhiassembly.delhi.gov.in/']};
-const Q={'Lok Sabha':['member of the 18th Lok Sabha'],'Rajya Sabha':['member of the Rajya Sabha'],'State Assembly':['member of the Delhi Legislative Assembly']};
+const HOUSES=[ // search phrase on Wikidata, and a test that a found position label must pass
+ {house:'Lok Sabha',search:'member of the 18th Lok Sabha',ok:l=>/18th lok sabha/.test(l)},
+ {house:'Rajya Sabha',search:'member of the Rajya Sabha',ok:l=>/^member of (the )?rajya sabha/.test(l)},
+ {house:'State Assembly',search:'member of the Delhi Legislative Assembly',ok:l=>/delhi/.test(l)&&/member/.test(l)}];
+const sparql=async q=>{const r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q)); if(!r.ok) throw new Error('Wikidata '+r.status); return (await r.json()).results.bindings};
 const $=id=>document.getElementById(id), log=t=>$('log').textContent=t;
 const cfg=()=>({fn:($('fn').value||localStorage.getItem('nn_fn')||'').trim(),tok:($('tok').value||localStorage.getItem('nn_tok')||'').trim()});
 const saved=k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}};
@@ -54,18 +58,25 @@ function nameIn(en,hi,t){ if(hi&&t.includes(norm(hi))) return true;
  const w=norm(en).split(' ').filter(x=>!HON.has(x)&&x.length>1); if(w.length<2) return false;
  for(const o of [w,[...w].reverse()]) if(new RegExp('(?<![\\p{L}\\p{N}_])'+o.map(esc).join('\\s+(?:[\\p{L}\\p{N}_]+\\s+)?')+'(?![\\p{L}\\p{N}_])','u').test(t)) return true; return false}
 
-async function wikidata(){ try{ let all=[];
- for(const [house,labels] of Object.entries(Q)){ log('Fetching '+house+' …');
-  const vals=labels.map(l=>`"${l}"@en`).join(' ');
-  const q=`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{VALUES ?pl {${vals}} ?pos rdfs:label ?pl .
+async function wikidata(){ try{ let all=[], notes=[];
+ for(const H of HOUSES){ log(notes.join('\n')+'\nSearching Wikidata for: '+H.search+' …');
+  const pos=await sparql(`SELECT ?pos ?posLabel WHERE{ SERVICE wikibase:mwapi{ bd:serviceParam wikibase:endpoint "www.wikidata.org"; wikibase:api "EntitySearch";
+    mwapi:search "${H.search}"; mwapi:language "en"; ?pos wikibase:apiOutputItem mwapi:item. }
+    SERVICE wikibase:label{bd:serviceParam wikibase:language "en".} } LIMIT 30`);
+  const found=pos.map(b=>({q:b.pos.value.split('/').pop(),l:(b.posLabel.value||'')})).filter(x=>H.ok(x.l.toLowerCase()));
+  notes.push(H.house+': positions found = '+(found.map(x=>x.l+' ('+x.q+')').join('; ')||'none'));
+  if(!found.length) continue; log(notes.join('\n')+'\nFetching people …');
+  const vals=found.map(x=>'wd:'+x.q).join(' ');
+  const rows=await sparql(`SELECT ?p ?en ?hi ?partyL ?distL ?x ?yt WHERE{ VALUES ?pos {${vals}}
    ?p p:P39 ?st . ?st ps:P39 ?pos . FILTER NOT EXISTS{?st pq:P582 ?end}
    ?p rdfs:label ?en FILTER(LANG(?en)="en") OPTIONAL{?p rdfs:label ?hi FILTER(LANG(?hi)="hi")}
    OPTIONAL{?p wdt:P102 ?party . ?party rdfs:label ?partyL FILTER(LANG(?partyL)="en")}
-   OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}}`;
-  const r=await fetch('https://query.wikidata.org/sparql?format=json&query='+encodeURIComponent(q)); if(!r.ok) throw new Error('Wikidata '+r.status);
-  const rows=(await r.json()).results.bindings; log(house+': '+rows.length+' rows');
-  for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value})}
- const res=await api('POST','',{action:'wikidata',rows:all}); log('Done: '+JSON.stringify(res)+' (from '+all.length+' rows)'); loadResults()
+   OPTIONAL{?st pq:P768 ?d . ?d rdfs:label ?distL FILTER(LANG(?distL)="en")} OPTIONAL{?p wdt:P2002 ?x} OPTIONAL{?p wdt:P2397 ?yt}}`);
+  notes.push('   people rows: '+rows.length);
+  for(const b of rows) all.push({qid:b.p.value.split('/').pop(),name_en:b.en.value,name_hi:b.hi?.value,party:b.partyL?.value,constituency:b.distL?.value,house:H.house,x_handle:b.x?.value,youtube_channel_id:b.yt?.value})}
+ log(notes.join('\n')+'\nSaving '+all.length+' rows …');
+ const res=all.length?await api('POST','',{action:'wikidata',rows:all}):{inserted:0,updated:0};
+ log(notes.join('\n')+'\nDone: '+JSON.stringify(res)+' (from '+all.length+' rows)'); loadResults()
 }catch(e){log('Error: '+e.message+(String(e).includes('Failed')?' (blocked by browser/CORS?)':''))}}
 
 async function runCheck(text){ const src=$('src').value; const {rows}=await api('GET','?action=politicians'); const t=norm(text); const results={}; let n=0;
