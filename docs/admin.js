@@ -1,4 +1,4 @@
-/* NetaNazar admin — one click updates members, attendance, positions and news. */
+/* NetaNazar admin — one click starts the update ON THE SERVER; this page only starts it and watches progress. */
 (() => {
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -6,7 +6,6 @@
   const ss = (k, v) => { try { localStorage.setItem(k, v); } catch { /* ignore */ } };
   const DEFAULT_BASE = 'https://qajsvaeamujtpdsutzgo.supabase.co/functions/v1';
   const ic = window.ic;
-  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   let saved = sg('nn_tok');
 
   // ---------------- icons & static labels ----------------
@@ -28,133 +27,83 @@
     if (r.status === 400 && j.error && j.error !== 'unknown action') throw new Error(j.error);
     return j;
   }
-  const retry = async (f) => { try { return await f(); } catch (e) { if (/token|reach/.test(e.message)) throw e; await sleep(1500); return f(); } };
 
   // ---------------- connection ----------------
   const chip = (cls, html) => { const c = $('#tokChip'); c.className = 'chip ' + cls; c.innerHTML = html; };
   async function verify() {
     if (!saved) { chip('', 'Not set'); $('#go').disabled = true; return false; }
     $('#tok').classList.remove('ok'); chip('warn', '<span class="sp"></span> Checking…');
-    try { await api('registry', 'GET', '?action=ping'); chip('ok', ic('check-circle') + ' Connected'); $('#tok').classList.add('ok'); $('#go').disabled = false; refresh(); return true; }
+    try { await api('registry', 'GET', '?action=ping'); chip('ok', ic('check-circle') + ' Connected'); $('#tok').classList.add('ok'); $('#go').disabled = false; refresh(); attach(); return true; }
     catch (e) { chip('off', ic('x-circle') + ' ' + esc(e.message)); $('#tok').classList.remove('ok'); $('#go').disabled = true; return false; }
   }
   $('#tok').addEventListener('input', () => { const d = $('#tok').value.trim() !== saved && $('#tok').value.trim(); $('#tokSave').style.display = d ? '' : 'none'; if (d) { $('#tok').classList.remove('ok'); chip('warn', 'Not saved yet'); } });
   $('#tokSave').onclick = () => { saved = $('#tok').value.trim(); ss('nn_tok', saved); ss('nn_base', $('#base').value.trim()); $('#tokSave').style.display = 'none'; verify(); };
-  $('#base').addEventListener('change', () => { ss('nn_base', $('#base').value.trim()); verify(); });
 
-  // ---------------- stages ----------------
-  const STAGES = [
-    { id: 'members', icon: 'users', name: 'Members', desc: 'Lok Sabha and Rajya Sabha: name, party, seat, photo, terms' },
+  // ---------------- stages (the server runs them; we only show them) ----------------
+  const GROUPS = [
+    { id: 'members', icon: 'users', name: 'Members', desc: 'Lok Sabha and Rajya Sabha lists, plus the seat and party of every past Lok Sabha term' },
     { id: 'attendance', icon: 'chart-bar', name: 'Attendance', desc: 'Every session of the current Lok Sabha' },
     { id: 'positions', icon: 'clipboard-text', name: 'Positions held', desc: 'Only members not loaded yet or older than 7 days; new positions are flagged' },
     { id: 'news', icon: 'newspaper', name: 'News', desc: 'Reads every news feed, keeps only stories that name a member' }];
   function drawStages() {
-    $('#stages').innerHTML = STAGES.map((s) => `<div class="stage" id="st-${s.id}"><span class="si">${ic(s.icon)}</span><div class="sb"><div class="sn">${esc(s.name)}</div><div class="sd" id="sd-${s.id}">${esc(s.desc)}</div><div class="bar"><i id="bar-${s.id}"></i></div>${s.id === 'news' ? '<div class="lanes" id="lanes"></div>' : ''}</div><label class="chk"><input type="checkbox" id="ck-${s.id}" checked> Include</label></div>`).join('');
+    $('#stages').innerHTML = GROUPS.map((s) => `<div class="stage" id="st-${s.id}"><span class="si">${ic(s.icon)}</span><div class="sb"><div class="sn">${esc(s.name)}</div><div class="sd" id="sd-${s.id}">${esc(s.desc)}</div><div class="bar"><i id="bar-${s.id}"></i></div><div class="lanes" id="ln-${s.id}"></div></div><label class="chk"><input type="checkbox" id="ck-${s.id}" checked> Include</label></div>`).join('');
   }
-  function setStage(id, state, text, pct) {
-    const el = $('#st-' + id); if (!el) return; el.className = 'stage ' + (state === 'idle' ? '' : state);
-    const icon = { run: '<span class="sp"></span>', ok: ic('check'), bad: ic('x'), skip: ic('minus'), idle: ic(STAGES.find((s) => s.id === id).icon) }[state];
-    el.querySelector('.si').innerHTML = icon; if (text != null) $('#sd-' + id).innerHTML = text; if (pct != null) $('#bar-' + id).style.width = Math.max(0, Math.min(100, pct)) + '%';
+  const TERM = ['done', 'failed', 'skipped', 'stopped'];
+  function renderJob(d) {
+    const job = d && d.job; const tasks = (d && d.tasks) || [];
+    const lg = $('#log'); if (lg) lg.textContent = job ? tasks.map((t) => `${t.label.padEnd(44)} ${t.status.padEnd(8)} ${t.detail || ''}`).join('\n') : 'Nothing yet.';
+    for (const g of GROUPS) {
+      const el = $('#st-' + g.id); if (!el) continue; const ts = tasks.filter((t) => t.grp === g.id);
+      if (!job) { el.className = 'stage'; continue; }
+      if (!ts.length) { el.className = 'stage skip'; $('#sd-' + g.id).textContent = 'Not included in the last run'; $('#ln-' + g.id).innerHTML = ''; el.querySelector('.si').innerHTML = ic('minus'); continue; }
+      const run = ts.some((t) => t.status === 'running' || t.status === 'queued'), pend = ts.some((t) => t.status === 'pending'), bad = ts.filter((t) => t.status === 'failed'), done = ts.filter((t) => t.status === 'done');
+      const st = run || pend ? 'run' : bad.length ? 'bad' : done.length === ts.length ? 'ok' : 'skip';
+      el.className = 'stage ' + st; el.querySelector('.si').innerHTML = st === 'run' ? '<span class="sp"></span>' : st === 'ok' ? ic('check') : st === 'bad' ? ic('x') : ic('minus');
+      const avg = Math.round(ts.reduce((a, t) => a + (TERM.includes(t.status) ? 100 : t.progress || 0), 0) / ts.length); $('#bar-' + g.id).style.width = avg + '%';
+      $('#sd-' + g.id).innerHTML = ts.length === 1 ? esc(ts[0].detail || g.desc) : `${done.length} of ${ts.length} finished${bad.length ? ` · <b style="color:var(--off)">${bad.length} failed</b>` : ''}`;
+      $('#ln-' + g.id).innerHTML = ts.length === 1 && g.id !== 'news' ? '' : ts.map((t) => {
+        const s = t.status === 'running' || t.status === 'queued' ? 'run' : t.status === 'done' ? 'ok' : t.status === 'failed' ? 'bad' : '';
+        const i = s === 'run' ? '<span class="sp"></span>' : s === 'ok' ? ic('check-circle') : s === 'bad' ? ic('x-circle') : ic('circle-notch');
+        return `<div class="lane ${s}"><span class="li">${i}</span><span><b>${esc(t.label)}</b><small>${esc(t.status === 'pending' ? 'Waiting for the member list…' : t.detail || t.status)}</small></span></div>`; }).join('');
+    }
   }
-  const log = (t) => { const l = $('#log'); l.textContent = (l.textContent === 'Nothing yet.' ? '' : l.textContent + '\n') + new Date().toLocaleTimeString('en-IN', { hour12: false }) + '  ' + t; l.scrollTop = l.scrollHeight; };
   const banner = (kind, html) => { const m = $('#msg'); m.className = 'msgbar show ' + kind; m.innerHTML = html; };
-  let STOP = false;
+  const setRunning = (on) => {
+    const go = $('#go'); go.disabled = on; go.classList.toggle('busy', on); go.innerHTML = on ? '<span class="sp"></span>' : GO_LABEL; if (on) go.setAttribute('aria-label', 'Updating'); else go.removeAttribute('aria-label');
+    $('#stop').style.display = on ? '' : 'none'; GROUPS.forEach((g) => { const c = $('#ck-' + g.id); if (c) c.disabled = on; });
+  };
 
-  async function stageMembers() {
-    let added = 0, former = 0, total = 0; setStage('members', 'run', 'Reading the Lok Sabha list from sansad.in…', 5);
-    for (const [i, house] of ['Lok Sabha', 'Rajya Sabha'].entries()) {
-      if (STOP) return 'stopped'; setStage('members', 'run', `Reading the ${house} list from sansad.in…`, 5 + i * 45);
-      const r = await retry(() => api('registry', 'POST', '', { action: 'official_fetch', house, mark_stale: true }));
-      added += r.inserted; former += r.marked_former; total += r.official_rows; log(`${house}: ${r.official_rows} members · ${r.matched} matched · ${r.inserted} new · ${r.marked_former} marked former`);
+  // ---------------- watching a job ----------------
+  let timer = null, lastNudge = 0, ticks = 0, current = null;
+  async function poll() {
+    let d; try { d = await api('worker', 'GET', '?action=progress'); } catch (e) { banner('bad', ic('warning') + ' ' + esc(e.message)); return; }
+    renderJob(d); const job = d.job; current = job;
+    const running = job && (job.status === 'running' || job.status === 'stopping'); setRunning(!!running);
+    if (running) {
+      banner('info', ic('lightning') + ' <b>Running on the server.</b> You can close this page — the update keeps going and the public site fills in as it finishes.');
+      const live = d.tasks.filter((t) => !TERM.includes(t.status)); const stale = live.length && live.every((t) => Date.now() - new Date(t.updated_at).getTime() > 150000);
+      if (stale && Date.now() - lastNudge > 60000) { lastNudge = Date.now(); api('worker', 'POST', '', { action: 'nudge' }).catch(() => {}); }
+      if (++ticks % 5 === 0) refresh();
+    } else {
+      stopWatching(); refresh();
+      if (job) { const failed = (job.summary && job.summary.failed) || []; const when = job.finished_at ? new Date(job.finished_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+        if (job.status === 'stopped') banner('info', ic('stop') + ' Stopped. Whatever finished is saved; run again any time to continue.');
+        else if (job.status === 'failed') banner('bad', ic('warning') + ' The last run was interrupted. Run again to continue.');
+        else if (failed.length) banner('bad', ic('warning') + ' Finished with problems in: <b>' + esc(failed.join(', ')) + '</b>. Run again to retry just what is missing.');
+        else banner('ok', ic('check-circle') + ' Last update finished' + (when ? ' on ' + esc(when) : '') + '. The public site shows the latest data.'); }
     }
-    if (STOP) return 'stopped';
-    setStage('members', 'run', 'Reading seats and parties of past Lok Sabha terms…', 92);
-    try { const r = await retry(() => api('registry', 'POST', '', { action: 'official_seats' })); log(`Seat history: ${r.lok_sabhas_read} past Lok Sabhas, ${r.members} members`); } catch (e) { log('Seat history skipped: ' + e.message); }
-    setStage('members', 'ok', `${total} sitting members updated · ${added} new · ${former} marked former`, 100);
   }
-  async function stageAttendance() {
-    setStage('attendance', 'run', 'Reading attendance session by session… (about half a minute)', 30);
-    const r = await retry(() => api('registry', 'POST', '', { action: 'official_attendance' }));
-    log(`Attendance: ${r.sessions} sessions, ${r.rows} records`); setStage('attendance', 'ok', `${r.sessions} sessions · ${r.rows} member records`, 100);
-  }
-  async function stagePositions() {
-    let doneAll = 0, newAll = 0, failedAll = 0;
-    for (const house of ['Lok Sabha', 'Rajya Sabha']) {
-      let start = null, stall = 0;
-      while (!STOP) {
-        const r = await retry(() => api('registry', 'POST', '', { action: 'official_details', house, limit: 40, only_stale: true }));
-        if (start == null) start = r.remaining + r.done; doneAll += r.done; newAll += r.new_positions; failedAll += r.failed;
-        const doneHere = start - r.remaining; setStage('positions', 'run', `${house}: ${doneHere} of ${start} members${newAll ? ` · ${newAll} new position${newAll == 1 ? '' : 's'} found` : ''}${failedAll ? ` · ${failedAll} failed` : ''}`, start ? 100 * doneHere / start : 100);
-        if (r.finished || r.remaining <= 0) break; if (r.done === 0 && ++stall >= 2) break; if (r.done > 0) stall = 0;
-      }
-      if (STOP) break;
-    }
-    if (STOP) return 'stopped';
-    log(`Positions: ${doneAll} members refreshed, ${newAll} new positions, ${failedAll} failed`);
-    setStage('positions', failedAll && !doneAll ? 'bad' : 'ok', doneAll ? `${doneAll} members refreshed${newAll ? ` · <b>${newAll} new position${newAll == 1 ? '' : 's'}</b> found` : ' · nothing new'}${failedAll ? ` · ${failedAll} failed (will retry next time)` : ''}` : 'Everyone is already up to date', 100);
-  }
+  function watch() { stopWatching(); ticks = 0; poll(); timer = setInterval(poll, 2000); }
+  function stopWatching() { if (timer) { clearInterval(timer); timer = null; } }
+  async function attach() { try { const d = await api('worker', 'GET', '?action=progress'); renderJob(d); if (d.job && ['running', 'stopping'].includes(d.job.status)) watch(); else if (d.job) { const f = d.job.finished_at || d.job.started_at; if (f) $('#last').textContent = 'Last update ' + ago(f); } } catch { /* first run: no jobs yet */ } }
 
-  const pdate = (n) => { const d = n.querySelector('pubDate,published,updated'); const t = d && new Date(d.textContent.trim()); return t && !isNaN(t) ? t.toISOString() : undefined; };
-  function parseFeed(text) {
-    const d = new DOMParser().parseFromString(text, 'text/xml'); const out = [];
-    d.querySelectorAll('item,entry').forEach((n) => { const l = n.querySelector('link'); const u = l && (l.getAttribute('href') || l.textContent); const t = n.querySelector('title'); if (u) out.push({ url: u.trim(), title: t && t.textContent.trim(), published: pdate(n) }); });
-    d.querySelectorAll('url').forEach((n) => { const loc = n.querySelector('loc'); const lm = n.querySelector('lastmod'); if (loc) { const t = lm && new Date(lm.textContent.trim()); out.push({ url: loc.textContent.trim(), published: t && !isNaN(t) ? t.toISOString() : undefined }); } });
-    return out;
-  }
-  async function stageNews() {
-    const { rows: sources } = await api('news', 'GET', '?action=sources'); const live = sources.filter((s) => !s.is_blocked);
-    if (!live.length) { setStage('news', 'bad', 'No news sources are available — add one below, or retry a blocked one.', 100); return; }
-    $('#lanes').innerHTML = live.map((s) => `<div class="lane" id="ln-${s.id}"><span class="li">${ic('circle-notch')}</span><span><b>${esc(s.name || s.domain)}</b><small>Waiting</small></span></div>`).join('');
-    const lane = (s, st, t) => { const el = $('#ln-' + s.id); if (!el) return; el.className = 'lane ' + st; el.querySelector('.li').innerHTML = st === 'run' ? '<span class="sp"></span>' : st === 'ok' ? ic('check-circle') : st === 'bad' ? ic('x-circle') : ic('circle-notch'); el.querySelector('small').innerHTML = t; };
-    const tot = { read: 0, keptNew: 0, edited: 0, deleted: 0, mentions: 0, irrelevant: 0, links: 0 }; let first = 0, done = 0;
-    const draw = () => setStage('news', 'run', `${tot.read} stories read · <b>${tot.keptNew + tot.edited} about members</b> · ${tot.irrelevant} skipped (no member named)${tot.deleted ? ` · ${tot.deleted} removed by publishers` : ''}`, first ? 100 * done / first : 5);
-    setStage('news', 'run', `Reading ${live.length} news sites at the same time…`, 3);
-    async function one(s) {
-      try {
-        lane(s, 'run', 'Reading the feed…'); let items = [], how = 'browser';
-        for (const u of [...(s.rss_urls || []), ...(s.sitemap_url ? [s.sitemap_url] : [])]) { try { const r = await fetch(u); if (!r.ok) throw 0; items = items.concat(parseFeed(await r.text())); } catch { how = 'server'; break; } }
-        let n = 0;
-        if (how === 'server' || !items.length) { lane(s, 'run', 'Site blocks browsers — reading from our server…'); const r = await api('news', 'POST', '', { action: 'fetchfeed', source_id: s.id }); if (r.skipped) { lane(s, 'bad', 'Paused (' + esc(r.skipped) + ')'); return; } n = r.added || 0; }
-        else n = (await api('news', 'POST', '', { action: 'ingest', source_id: s.id, items })).added; tot.links += n;
-        let rem = null, stall = 0, mine = { read: 0, kept: 0 };
-        while (!STOP) {
-          lane(s, 'run', `${n} new links · read ${mine.read}${rem != null ? ' · ' + rem + ' waiting' : ''}`);
-          const r = await api('news', 'POST', '', { action: 'process', limit: 30, source_id: s.id });
-          mine.read += r.processed; mine.kept += r.new + r.changed; tot.read += r.processed; tot.keptNew += r.new; tot.edited += r.changed; tot.deleted += r.deleted; tot.mentions += r.mentions; tot.irrelevant += r.irrelevant;
-          done += r.processed; first = Math.max(first, done + r.remaining); rem = r.remaining; draw(); if (rem <= 0) break; if (r.processed === 0) { if (r.skipped > 0 || ++stall >= 2) break; } else stall = 0;
-        }
-        lane(s, STOP && rem > 0 ? 'run' : 'ok', `${n} new links · ${mine.read} read · <b>${mine.kept}</b> about members${rem > 0 ? ' · ' + rem + ' left' : ''}`);
-      } catch (e) { lane(s, 'bad', esc(e.message)); }
-    }
-    await Promise.all(live.map(one));
-    if (STOP) return 'stopped';
-    log(`News: ${tot.links} new links, ${tot.read} read, ${tot.keptNew} new member stories, ${tot.edited} edits, ${tot.deleted} removed, ${tot.irrelevant} skipped`);
-    setStage('news', 'ok', `${tot.links} new links · ${tot.read} stories read · <b>${tot.keptNew + tot.edited} about members</b> (${tot.mentions} mentions)${tot.edited ? ` · ${tot.edited} edited` : ''}${tot.deleted ? ` · ${tot.deleted} removed` : ''}`, 100);
-  }
-
-  const RUNNERS = { members: stageMembers, attendance: stageAttendance, positions: stagePositions, news: stageNews };
-  let running = false;
-  async function runAll() {
-    if (running) return; running = true; STOP = false; $('#msg').className = 'msgbar';
-    const go = $('#go'); go.disabled = true; go.classList.add('busy'); go.setAttribute('aria-label', 'Updating'); go.innerHTML = '<span class="sp"></span>'; $('#stop').style.display = ''; $('#stop').innerHTML = STOP_LABEL;
-    drawStages(); const picked = STAGES.filter((s) => $('#ck-' + s.id).checked); const failed = [];
-    STAGES.forEach((s) => { if (!picked.includes(s)) setStage(s.id, 'skip', 'Skipped'); });
-    // keep the user's checkboxes after redraw
-    STAGES.forEach((s) => { $('#ck-' + s.id).checked = picked.includes(s); $('#ck-' + s.id).disabled = true; });
-    const t0 = Date.now();
-    for (const s of picked) {
-      if (STOP) { setStage(s.id, 'skip', 'Stopped before this step'); continue; }
-      setStage(s.id, 'run', 'Starting…', 2);
-      try { const r = await RUNNERS[s.id](); if (r === 'stopped') setStage(s.id, 'skip', 'Stopped'); }
-      catch (e) { failed.push(s.name); setStage(s.id, 'bad', esc(e.message)); log(s.name + ' failed: ' + e.message); if (/token|reach/.test(e.message)) break; }
-    }
-    const mins = Math.max(1, Math.round((Date.now() - t0) / 6e4));
-    if (STOP) banner('info', ic('stop') + ' Stopped. Whatever finished is saved; run again any time to continue.');
-    else if (failed.length) banner('bad', ic('warning') + ' Finished with problems in: <b>' + esc(failed.join(', ')) + '</b>. Run again to retry just what is missing.');
-    else banner('ok', ic('check-circle') + ` All done in about ${mins} min. The public site now shows the latest data.`);
-    STAGES.forEach((s) => { $('#ck-' + s.id).disabled = false; }); go.disabled = false; go.classList.remove('busy'); go.removeAttribute('aria-label'); go.innerHTML = GO_LABEL; $('#stop').style.display = 'none'; running = false; refresh();
-  }
-  $('#go').onclick = runAll; $('#stop').onclick = () => { STOP = true; $('#stop').innerHTML = '<span class="sp"></span>'; };
+  $('#go').onclick = async () => {
+    const stages = GROUPS.filter((g) => $('#ck-' + g.id).checked).map((g) => g.id); if (!stages.length) { banner('bad', 'Tick at least one step to include.'); return; }
+    setRunning(true);
+    try { const r = await api('worker', 'POST', '', { action: 'start', stages }); if (r.empty) { setRunning(false); return; } watch(); }
+    catch (e) { setRunning(false); banner('bad', ic('warning') + ' ' + esc(e.message)); }
+  };
+  $('#stop').onclick = async () => { $('#stop').innerHTML = '<span class="sp"></span>'; try { await api('worker', 'POST', '', { action: 'stop' }); } catch { /* ignore */ } setTimeout(() => { $('#stop').innerHTML = STOP_LABEL; }, 1500); poll(); };
 
   // ---------------- overview & sources ----------------
   const ago = (iso) => { if (!iso) return 'never'; const m = Math.round((Date.now() - new Date(iso)) / 6e4); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
