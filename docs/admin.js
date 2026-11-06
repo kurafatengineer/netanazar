@@ -9,7 +9,7 @@
   let saved = sg('nn_tok');
 
   // ---------------- icons & static labels ----------------
-  $('#mark').innerHTML = ic('eye'); $('#themeIc').innerHTML = ic('sun'); $('#cIc').innerHTML = ic('key'); $('#sIc').innerHTML = ic('chart-bar'); $('#nIc').innerHTML = ic('newspaper');
+  $('#mark').innerHTML = ic('eye'); $('#themeIc').innerHTML = ic('sun'); $('#cIc').innerHTML = ic('key'); $('#sIc').innerHTML = ic('chart-bar'); $('#nIc').innerHTML = ic('newspaper'); $('#hIc').innerHTML = ic('database');
   const GO_LABEL = ic('arrows-clockwise') + ' Update everything'; const STOP_LABEL = ic('stop') + ' Stop';
   $('#go').innerHTML = GO_LABEL; $('#stop').innerHTML = STOP_LABEL; $('#addSrc').innerHTML = ic('plus') + ' Add source';
   $('#tok').value = saved; $('#base').value = sg('nn_base') || DEFAULT_BASE;
@@ -107,7 +107,17 @@
 
   // ---------------- overview & sources ----------------
   const ago = (iso) => { if (!iso) return 'never'; const m = Math.round((Date.now() - new Date(iso)) / 6e4); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
+  const HGROUPS = [[/^sansad:ls:members/, 'Lok Sabha members'], [/^sansad:rs:members/, 'Rajya Sabha members'], [/^sansad:ministers/, 'Ministers'], [/^sansad:ls:attendance|^sansad:ls:sessions/, 'Attendance sessions'], [/^sansad:ls:past/, 'Past Lok Sabha lists'], [/^feed:/, 'News feeds']];
+  async function drawHashes() {
+    try {
+      const { rows } = await api('registry', 'GET', '?action=hashes'); const g = new Map();
+      for (const r of rows) { const name = (HGROUPS.find(([re]) => re.test(r.key)) || [0, 'Other'])[1]; const o = g.get(name) || { n: 0, items: 0, checked: null, changed: null }; o.n++; o.items += r.item_count || 0;
+        if (!o.checked || r.checked_at > o.checked) o.checked = r.checked_at; if (!o.changed || (r.changed_at || '') > o.changed) o.changed = r.changed_at; g.set(name, o); }
+      $('#hashTbl').innerHTML = [...g].map(([k, o]) => `<tr><td><b>${esc(k)}</b><div class="fine" style="margin:0">${o.n} fingerprint${o.n == 1 ? '' : 's'}${o.items ? ' · ' + o.items.toLocaleString('en-IN') + ' items' : ''}</div></td><td style="text-align:right;white-space:nowrap">Checked ${ago(o.checked)}<div class="fine" style="margin:0">Last change ${ago(o.changed)}</div></td></tr>`).join('') || '<tr><td class="fine">No fingerprints yet — run an update.</td></tr>';
+    } catch { /* optional card */ }
+  }
   async function refresh() {
+    drawHashes();
     try {
       const [st, ov, src] = await Promise.all([api('registry', 'GET', '?action=status'), api('news', 'GET', '?action=overview'), api('news', 'GET', '?action=sources')]);
       $('#last').textContent = `Members ${ago(st.members_updated_at)} · attendance ${ago(st.attendance_updated_at)}`;

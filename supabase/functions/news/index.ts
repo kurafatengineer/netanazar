@@ -272,7 +272,14 @@ Deno.serve(async (req) => {
       for (const u of [...(s.rss_urls ?? []), ...(s.sitemap_url ? [s.sitemap_url] : [])]) {
         const r: any = await politeGet(u, s); if (r.status === 200) items = items.concat(parseFeed(r.text));
       }
-      return json({ added: await ingest(items, s.id), found: items.length });
+      // Fingerprint of the list of links in the feed: if it is identical to last time (and we already hold articles), nothing is new.
+      const key = 'feed:' + s.id; const fp = await sha256(items.map((i) => canonical(i.url)).sort().join('\n'));
+      const { data: prev } = await db.from('source_hashes').select('hash').eq('key', key).maybeSingle();
+      const { count: have } = await db.from('articles').select('id', { count: 'exact', head: true }).eq('source_id', s.id);
+      if (items.length && prev?.hash === fp && (have ?? 0) > 0) { await db.from('source_hashes').update({ checked_at: nowIso() }).eq('key', key); return json({ added: 0, found: items.length, unchanged: true }); }
+      const added = await ingest(items, s.id);
+      if (items.length) await db.from('source_hashes').upsert({ key, hash: fp, item_count: items.length, checked_at: nowIso(), changed_at: nowIso() }, { onConflict: 'key' });
+      return json({ added, found: items.length, unchanged: false });
     }
     if (b.action === 'add_source') {
       const rss = String(b.rss_url ?? '').trim(); let host = ''; try { host = new URL(rss).host.replace(/^www\./, ''); } catch { return json({ error: 'Enter a valid RSS address starting with https://' }, 400); }

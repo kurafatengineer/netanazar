@@ -58,20 +58,21 @@ const RUNNERS: Record<string, (t: any, st: any, c: Ctx) => Promise<Result>> = {
   async members(t, st, c) {
     const house = t.params.house; await c.progress(`Reading the ${house} list from sansad.in…`, 15, st);
     const r = await retry(() => call('registry', { action: 'official_fetch', house, mark_stale: true }));
-    return { done: true, detail: `${r.official_rows} members · ${r.matched} matched · ${r.inserted} new · ${r.marked_former} marked former` };
+    if (r.unchanged) return { done: true, detail: `No change at sansad.in since the last check — nothing to update (${r.official_rows} members)` };
+    return { done: true, detail: `${r.official_rows} members · ${r.updated ?? 0} updated · ${r.unchanged_rows ?? 0} unchanged · ${r.inserted} new · ${r.marked_former} marked former` };
   },
-  async seats(_t, st, c) { await c.progress('Reading seats and parties of past Lok Sabha terms…', 20, st); const r = await retry(() => call('registry', { action: 'official_seats' })); return { done: true, detail: `${r.members} members · ${r.lok_sabhas_read} past Lok Sabhas read` }; },
-  async attendance(_t, st, c) { await c.progress('Reading attendance session by session…', 20, st); const r = await retry(() => call('registry', { action: 'official_attendance' })); return { done: true, detail: `${r.sessions} sessions · ${r.rows} member records` }; },
+  async seats(_t, st, c) { await c.progress('Reading seats and parties of past Lok Sabha terms…', 20, st); const r = await retry(() => call('registry', { action: 'official_seats' })); return { done: true, detail: r.members ? `${r.members} members updated · ${r.lok_sabhas_read} past Lok Sabha lists read` : `No change — ${r.unchanged ?? 0} members already up to date (${r.lok_sabhas_read} lists read)` }; },
+  async attendance(_t, st, c) { await c.progress('Reading attendance session by session…', 20, st); const r = await retry(() => call('registry', { action: 'official_attendance' })); return { done: true, detail: `${r.sessions} sessions · ${r.unchanged_sessions ?? 0} unchanged · ${r.requests ?? '?'} request${r.requests == 1 ? '' : 's'} to sansad.in` }; },
   async positions(t, st, c) {
     const house = t.params.house; st.done ??= 0; st.newp ??= 0; st.failed ??= 0; st.stall ??= 0;
     for (;;) {
       if (await c.stop()) return { done: false, stopped: true, state: st };
       if (c.left() < 45000) return { done: false, state: st };
       const r = await call('registry', { action: 'official_details', house, limit: 20, only_stale: true });
-      if (st.start == null) st.start = r.remaining + r.done; st.done += r.done; st.newp += r.new_positions; st.failed += r.failed;
+      if (st.start == null) st.start = r.remaining + r.done; st.same = (st.same ?? 0) + (r.unchanged ?? 0); st.done += r.done; st.newp += r.new_positions; st.failed += r.failed;
       const here = st.start - r.remaining; const txt = `${here} of ${st.start} members${st.newp ? ` · ${st.newp} new position${st.newp == 1 ? '' : 's'}` : ''}${st.failed ? ` · ${st.failed} failed` : ''}`;
       await c.progress(txt, st.start ? Math.round(100 * here / st.start) : 100, st);
-      if (r.finished || r.remaining <= 0) return { done: true, detail: st.done ? `${st.done} members refreshed${st.newp ? ` · ${st.newp} new position${st.newp == 1 ? '' : 's'} found` : ' · nothing new'}${st.failed ? ` · ${st.failed} failed (retried next time)` : ''}` : 'Everyone is already up to date', state: st };
+      if (r.finished || r.remaining <= 0) return { done: true, detail: st.done ? `${st.done} members checked \u00b7 ${st.same ?? 0} unchanged${st.newp ? ` · ${st.newp} new position${st.newp == 1 ? '' : 's'} found` : ' · nothing new'}${st.failed ? ` · ${st.failed} failed (retried next time)` : ''}` : 'Everyone is already up to date', state: st };
       if (r.done === 0) { if (++st.stall >= 2) return { done: true, detail: `Stopped early: ${st.failed} failed`, state: st }; } else st.stall = 0;
     }
   },
@@ -81,7 +82,7 @@ const RUNNERS: Record<string, (t: any, st: any, c: Ctx) => Promise<Result>> = {
       await c.progress('Reading the feed…', 5, st);
       const r = await retry(() => call('news', { action: 'fetchfeed', source_id: sid }));
       if (r.skipped) return { done: true, detail: `Paused (${r.skipped})`, state: st };
-      st.links = r.added ?? 0; st.phase = 'wait'; await c.progress(`${st.links} new links — waiting for the member list…`, 15, st);
+      st.unchangedFeed = !!r.unchanged; st.links = r.added ?? 0; st.phase = 'wait'; await c.progress(`${st.links} new links — waiting for the member list…`, 15, st);
     }
     if (st.phase === 'wait') {   // matching needs the member list; wait for this job's member tasks (if any)
       for (;;) {
@@ -98,7 +99,7 @@ const RUNNERS: Record<string, (t: any, st: any, c: Ctx) => Promise<Result>> = {
       const r = await call('news', { action: 'process', limit: 15, source_id: sid });
       st.read += r.processed; st.kept += r.new + r.changed; st.skipped += r.irrelevant; st.rem = r.remaining; if (st.total == null) st.total = st.read + r.remaining;
       await c.progress(`${st.links} new links · ${st.read} read · ${st.kept} about members${r.remaining ? ` · ${r.remaining} waiting` : ''}`, st.total ? Math.min(99, Math.round(100 * st.read / st.total)) : 50, st);
-      if (r.remaining <= 0) return { done: true, detail: `${st.links} new links · ${st.read} read · ${st.kept} about members`, state: st };
+      if (r.remaining <= 0) return { done: true, detail: st.unchangedFeed && !st.read ? 'Feed unchanged since the last check — nothing new' : `${st.links} new links · ${st.read} read · ${st.kept} about members`, state: st };
       if (r.processed === 0) { if (r.skipped > 0 || ++st.stall >= 2) return { done: true, detail: `${st.links} new links · ${st.read} read · ${st.kept} about members`, state: st }; } else st.stall = 0;
     }
   },
