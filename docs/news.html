@@ -1,78 +1,68 @@
 <!doctype html>
 <html lang="hi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NetaNazar News</title>
-<style>
-:root{--bg:#fff;--fg:#1a1a1a;--mut:#666;--line:#e3e3e3;--acc:#1a56db;--add:#c8f7c5;--rem:#f9c0c0;--bad:#b00020}
-@media(prefers-color-scheme:dark){:root{--bg:#121212;--fg:#eee;--mut:#9a9a9a;--line:#2c2c2c;--acc:#6ea0ff;--add:#1f4d28;--rem:#5a2626}}
-body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:15px system-ui;max-width:980px;margin:auto}
-button{font:inherit;padding:10px 18px;border-radius:8px;border:1px solid var(--acc);background:var(--acc);color:#fff;cursor:pointer}
-button:disabled{opacity:.5} button.alt{background:transparent;color:var(--acc);padding:4px 10px}
-input,select{font:inherit;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);max-width:100%}
-.card{border:1px solid var(--line);border-radius:10px;padding:12px;margin:12px 0}.mut{color:var(--mut);font-size:13px}
-a{color:var(--acc)} ins{background:var(--add);text-decoration:none} del{background:var(--rem)}
-.del{background:var(--bad);color:#fff;padding:1px 7px;border-radius:4px;font-size:12px}
-.row{padding:8px 0;border-bottom:1px solid var(--line)} #log{white-space:pre-wrap;font-size:13px;color:var(--mut)}
-.v{border-top:1px dashed var(--line);margin-top:8px;padding-top:6px;white-space:pre-wrap}
-</style></head><body>
-<h1>NetaNazar · News <a href="index.html" style="font-size:14px">Registry</a></h1>
-<div class="card">Token: <input id="tok" type="password" placeholder="REGISTRY_TOKEN"> <button class="alt" onclick="save()">Save</button>
-<div class="mut">Saved only in this browser. Function URL base: <input id="base" size="46"></div></div>
+<title>NetaNazar News</title><link rel="stylesheet" href="app.css"></head><body><main>
+<header><h1>NetaNazar</h1><nav><a href="index.html">Politicians</a><a class="on" href="news.html">News</a></nav></header>
+<section class="card" id="setup"></section>
 
-<div class="card"><button id="run" onclick="runAll()">▶ Run now (daily click)</button>
-<p class="mut">Steps: (1) your browser reads each news site's RSS feed (if a site refuses, our server tries politely);
-(2) new article links are saved; (3) the server fetches due articles politely (robots.txt, delay per site), saves the text,
-records any edits or deletions, and notes which politicians are mentioned. If it says "more remaining", click again.</p>
-<div id="log"></div></div>
+<section class="card"><h2>Daily run</h2>
+<p class="mut">One click: reads each news site’s feed, saves new articles, fetches their text politely, records edits and deletions, and notes which politicians are mentioned. If it says “more waiting”, click again.</p>
+<button id="run">▶ Run now</button><ul id="steps"></ul><div class="bar" id="barw" style="display:none"><i id="bar"></i></div><div id="runMsg" class="msg"></div></section>
 
-<div class="card"><b>Tracked articles</b> · politician: <select id="pf" onchange="render()"><option value="">All</option></select>
-status: <select id="sf" onchange="render()"><option value="">Any</option><option>active</option><option>deleted</option><option>unreachable</option></select>
-<button class="alt" onclick="load()">Reload</button><div id="list"></div></div>
-
+<section class="card"><div class="row"><h2 style="flex:1;margin:0">Tracked articles</h2><button id="reload" class="ghost">↻ Reload</button></div>
+<div class="row" style="margin-top:10px"><select id="pf"><option value="">All politicians</option></select>
+<select id="sf"><option value="">Any status</option><option>active</option><option>deleted</option><option>unreachable</option></select></div>
+<div id="listState" class="mut"></div><div id="list"></div></section>
+</main>
+<script src="app.js"></script>
 <script>
-const $=id=>document.getElementById(id), log=t=>$('log').textContent=t, esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-const sv=k=>{try{return localStorage.getItem(k)||''}catch(e){return ''}};
-$('tok').value=sv('nn_tok'); $('base').value=sv('nn_base')||'https://qajsvaeamujtpdsutzgo.supabase.co/functions/v1';
-function save(){try{localStorage.setItem('nn_tok',$('tok').value.trim());localStorage.setItem('nn_base',$('base').value.trim())}catch(e){} log('Saved.');load()}
-async function api(method,qs,body){const r=await fetch($('base').value.trim()+'/news'+(qs||''),{method,headers:{'x-token':$('tok').value.trim(),'content-type':'application/json'},body:body&&JSON.stringify(body)});
- if(r.status===403) throw new Error('403: token does not match Supabase secret REGISTRY_TOKEN'); const j=await r.json(); if(!r.ok) throw new Error(j.error||r.status); return j}
-
+const {$,esc,api,msg,clear,busy,steps}=NN;
 function parseFeed(text){const d=new DOMParser().parseFromString(text,'text/xml'); const out=[];
- d.querySelectorAll('item,entry').forEach(n=>{let l=n.querySelector('link'); let u=l&&(l.getAttribute('href')||l.textContent); const t=n.querySelector('title');
-  if(u) out.push({url:u.trim(),title:t&&t.textContent.trim()})});
+ d.querySelectorAll('item,entry').forEach(n=>{const l=n.querySelector('link'); const u=l&&(l.getAttribute('href')||l.textContent); const t=n.querySelector('title'); if(u) out.push({url:u.trim(),title:t&&t.textContent.trim()})});
  d.querySelectorAll('url > loc').forEach(n=>out.push({url:n.textContent.trim()})); return out}
 
-async function runAll(){ $('run').disabled=true; try{
- const {rows:sources}=await api('GET','?action=sources'); let lines=[],added=0;
- for(const s of sources.filter(x=>!x.is_blocked)){ let items=[],how='browser';
-  for(const u of [...(s.rss_urls||[]),...(s.sitemap_url?[s.sitemap_url]:[])]){
-   try{const r=await fetch(u); if(!r.ok) throw 0; items=items.concat(parseFeed(await r.text()))}catch(e){how='server'; break}}
-  if(how==='server'||(!items.length&&(s.rss_urls||[]).length)){ try{const r=await api('POST','',{action:'fetchfeed',source_id:s.id}); added+=r.added||0; lines.push(s.name+': server, new '+(r.added||0)+(r.skipped?' ('+r.skipped+')':''))}catch(e){lines.push(s.name+': failed')} }
-  else if(items.length){ const r=await api('POST','',{action:'ingest',source_id:s.id,items}); added+=r.added; lines.push(s.name+': browser, '+items.length+' links, new '+r.added) }
-  else lines.push(s.name+': no feed configured');
-  log(lines.join('\n')) }
- lines.push('Fetching articles …'); log(lines.join('\n'));
- let tot={processed:0,new:0,changed:0,deleted:0,mentions:0}, rem=1, guard=0, last=-1;
- while(rem>0&&guard++<40){ const r=await api('POST','',{action:'process',limit:30}); for(const k in tot) tot[k]+=r[k]||0; rem=r.remaining;
-  lines[lines.length-1]='Articles: '+tot.processed+' processed, '+tot.new+' new, '+tot.changed+' edited, '+tot.deleted+' deleted, '+tot.mentions+' mentions; remaining '+rem; log(lines.join('\n'));
-  if(r.processed===0&&r.skipped===0) break; if(last===rem&&r.processed===0) break; last=rem; if(guard>=3&&rem>0&&r.processed<5) break }
- lines.push(rem>0?'Done for now — ' + rem + ' more waiting. Click Run again.':'All done ✅'); log(lines.join('\n')); load();
-}catch(e){log('Error: '+e.message)} $('run').disabled=false}
+async function runAll(){ const S=steps($('steps')); clear($('runMsg')); $('barw').style.display='none';
+ try{
+  S.add('src','Reading list of news sites'); S.set('src','busy'); const {rows:sources}=await api('news','GET','?action=sources'); const live=sources.filter(x=>!x.is_blocked);
+  S.set('src','ok','Found '+live.length+' news sites'+(sources.length>live.length?' ('+(sources.length-live.length)+' skipped: blocked)':''));
+  for(const s of live) S.add('s'+s.id,s.name||s.domain); S.add('art','Fetching article text'); let added=0;
+  for(const s of live){ const id='s'+s.id; S.set(id,'busy',esc(s.name)+' — reading feed from your browser…'); let items=[],how='browser';
+   for(const u of [...(s.rss_urls||[]),...(s.sitemap_url?[s.sitemap_url]:[])]){ try{const r=await fetch(u); if(!r.ok) throw 0; items=items.concat(parseFeed(await r.text()))}catch{how='server';break} }
+   try{
+    if(!(s.rss_urls||[]).length&&!s.sitemap_url){ S.set(id,'bad',esc(s.name)+' — no feed address saved'); continue }
+    if(how==='server'||!items.length){ S.set(id,'busy',esc(s.name)+' — site blocks browser reading, trying from our server…'); const r=await api('news','POST','',{action:'fetchfeed',source_id:s.id}); added+=r.added||0;
+     S.set(id,r.skipped?'bad':'ok',esc(s.name)+' — '+(r.skipped?'skipped ('+r.skipped+')':'server read, '+(r.added||0)+' new links')) }
+    else { const r=await api('news','POST','',{action:'ingest',source_id:s.id,items}); added+=r.added; S.set(id,'ok',esc(s.name)+' — '+items.length+' links, '+r.added+' new') }
+   }catch(e){ S.set(id,'bad',esc(s.name)+' — '+esc(e.message)) } }
+  let tot={processed:0,new:0,changed:0,deleted:0,mentions:0}, rem=null, first=null, guard=0, stall=0; $('barw').style.display='';
+  while(guard++<60){ S.set('art','busy','Fetching article text… '+tot.processed+' done'+(rem!=null?', '+rem+' waiting':''));
+   const r=await api('news','POST','',{action:'process',limit:30}); for(const k in tot) tot[k]+=r[k]||0; rem=r.remaining; if(first==null) first=tot.processed+rem;
+   $('bar').style.width=Math.min(100,first?100*tot.processed/first:100)+'%'; if(rem<=0) break; if(r.processed===0&&r.skipped===0){ if(++stall>=2) break } else stall=0; if(guard>=4) break }
+  S.set('art',rem>0?'busy':'ok','Articles: '+tot.processed+' fetched · '+tot.new+' new · '+tot.changed+' edited · '+tot.deleted+' deleted · '+tot.mentions+' mentions'); $('bar').style.width=rem>0?'60%':'100%';
+  if(rem>0){ S.set('art','busy','Articles: '+tot.processed+' fetched, '+rem+' still waiting'); msg($('runMsg'),'busy','Paused to stay polite — <b>'+rem+'</b> articles are waiting. Click “Run now” again to continue.') }
+  else msg($('runMsg'),'ok','All done. '+added+' new links, '+tot.new+' new articles, '+tot.mentions+' politician mentions.');
+  load();
+ }catch(e){ msg($('runMsg'),'bad',esc(e.message)); throw e }}
+$('run').onclick=()=>busy($('run'),'Running…',runAll).catch(()=>{});
 
-let DATA=[]; async function load(){ try{const {rows}=await api('GET','?action=articles'); DATA=rows;
- const names=new Set(); rows.forEach(a=>a.mentions.forEach(m=>m.politicians&&names.add(m.politicians.name_en)));
- const cur=$('pf').value; $('pf').innerHTML='<option value="">All</option>'+[...names].sort().map(n=>'<option>'+esc(n)+'</option>').join(''); $('pf').value=cur; render()
-}catch(e){$('list').textContent=sv('nn_tok')?e.message:'Enter the token first.'}}
+let DATA=[];
+async function load(){ $('listState').innerHTML='<span class="spin"></span> Loading…';
+ try{ const {rows}=await api('news','GET','?action=articles'); DATA=rows; const names=new Set(); rows.forEach(a=>a.mentions.forEach(m=>m.politicians&&names.add(m.politicians.name_en)));
+  const cur=$('pf').value; $('pf').innerHTML='<option value="">All politicians</option>'+[...names].sort().map(n=>'<option>'+esc(n)+'</option>').join(''); $('pf').value=cur; render();
+ }catch(e){ $('list').innerHTML=''; $('listState').innerHTML='<span class="chip bad">✗ '+esc(e.message)+'</span>' }}
 function render(){ const pf=$('pf').value, sf=$('sf').value;
- $('list').innerHTML=DATA.filter(a=>(!sf||a.status===sf)&&(!pf||a.mentions.some(m=>m.politicians&&m.politicians.name_en===pf))).map(a=>{
-  const v=a.article_versions&&a.article_versions[0]?a.article_versions[0].count:0;
+ const rows=DATA.filter(a=>(!sf||a.status===sf)&&(!pf||a.mentions.some(m=>m.politicians&&m.politicians.name_en===pf)));
+ $('listState').innerHTML=DATA.length?rows.length+' of '+DATA.length+' articles':'<div class="empty">Nothing yet. Click “Run now”.</div>';
+ $('list').innerHTML=rows.map(a=>{ const v=a.article_versions&&a.article_versions[0]?a.article_versions[0].count:0;
   const who=a.mentions.map(m=>esc(m.politicians?m.politicians.name_en:'')+(m.party_at_mention?' ('+esc(m.party_at_mention)+')':'')).join(', ');
-  return '<div class="row"><a href="javascript:void 0" onclick="openA(\''+a.id+'\',this)">'+esc(a.title||a.url)+'</a> '+(a.status==='deleted'?'<span class="del">DELETED '+(a.deleted_at||'').slice(0,16).replace('T',' ')+' UTC</span>':'<span class="mut">'+a.status+'</span>')+
-  '<div class="mut">'+(a.first_seen_at||'').slice(0,16).replace('T',' ')+' · '+v+' version'+(v==1?'':'s')+(who?' · '+who:'')+' · <a href="'+esc(a.url)+'" target="_blank" rel="noopener">open site</a></div><div class="d"></div></div>'}).join('')||'<p class="mut">Nothing yet. Click Run now.</p>'}
+  return '<div class="item"><a href="javascript:void 0" data-id="'+a.id+'">'+esc(a.title||a.url)+'</a> '+(a.status==='deleted'?'<span class="badge">DELETED '+esc((a.deleted_at||'').slice(0,16).replace('T',' '))+' UTC</span>':'<span class="chip">'+esc(a.status)+'</span>')+
+  '<div class="mut" style="margin:2px 0">'+esc((a.first_seen_at||'').slice(0,16).replace('T',' '))+' · '+v+' version'+(v==1?'':'s')+(who?' · '+who:'')+' · <a href="'+esc(a.url)+'" target="_blank" rel="noopener">open site ↗</a></div><div class="d"></div></div>'}).join('') }
+$('list').onclick=async e=>{ const a=e.target.closest('a[data-id]'); if(!a) return; const d=a.parentNode.querySelector('.d'); if(d.innerHTML){d.innerHTML='';return}
+ d.innerHTML='<span class="spin"></span> Loading versions…'; try{ const {rows}=await api('news','GET','?action=article&id='+a.dataset.id);
+ d.innerHTML=rows.map((v,i)=>'<div class="v"><b>'+(i?'v'+v.version_no+' · changed ':'Original (v1) · ')+esc((v.captured_at||'').slice(0,19).replace('T',' '))+' UTC</b><br>'+(i?diffWords(rows[i-1].body_text||'',v.body_text||''):esc(v.body_text||''))+'</div>').join('')||'No saved text yet.' }catch(err){ d.innerHTML='<span class="chip bad">✗ '+esc(err.message)+'</span>' }};
 function diffWords(a,b){const x=a.split(/\s+/),y=b.split(/\s+/);const m=x.length,n=y.length; if(m*n>4e6) return esc(b);
  const L=Array.from({length:m+1},()=>new Uint16Array(n+1)); for(let i=m-1;i>=0;i--)for(let j=n-1;j>=0;j--)L[i][j]=x[i]===y[j]?L[i+1][j+1]+1:Math.max(L[i+1][j],L[i][j+1]);
  let i=0,j=0,o=[]; while(i<m&&j<n){ if(x[i]===y[j]){o.push(esc(x[i]));i++;j++} else if(L[i+1][j]>=L[i][j+1]){o.push('<del>'+esc(x[i])+'</del>');i++} else {o.push('<ins>'+esc(y[j])+'</ins>');j++}}
  while(i<m)o.push('<del>'+esc(x[i++])+'</del>'); while(j<n)o.push('<ins>'+esc(y[j++])+'</ins>'); return o.join(' ')}
-async function openA(id,el){ const d=el.parentNode.querySelector('.d'); if(d.innerHTML){d.innerHTML='';return} d.textContent='Loading…';
- const {rows}=await api('GET','?action=article&id='+id); d.innerHTML=rows.map((v,i)=>'<div class="v"><b>'+(i?'v'+v.version_no+' · changed ':'Original (v1) · ')+(v.captured_at||'').slice(0,19).replace('T',' ')+' UTC</b><br>'+(i?diffWords(rows[i-1].body_text||'',v.body_text||''):esc(v.body_text||''))+'</div>').join('')}
-if(sv('nn_tok')) load();
+$('pf').onchange=render; $('sf').onchange=render; $('reload').onclick=load;
+NN.setup({onReady:load});
 </script></body></html>
