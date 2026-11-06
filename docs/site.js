@@ -63,15 +63,17 @@
     const tip = `${status}${m.party ? ' · ' + m.party : ''}`;
     return `<span class="idav idav-${size} ${off ? 'off' : 'on'}" style="--party:${ps.bg};--pf:${ps.fg}" title="${esc(tip)}" role="img" aria-label="${esc(m.name_en + ': ' + tip)}"><span class="face">${esc(initials(m.name_en))}${m.photo_url ? `<img loading="lazy" referrerpolicy="no-referrer" alt="" src="${esc(m.photo_url)}" onerror="this.remove()">` : ''}</span><span class="st">${ic(off ? 'x' : 'check')}</span>${size === 'l' ? `<span class="pill">${esc(partyShort(m.party))}${off ? ' · former' : ''}</span>` : ''}</span>`;
   }
+  // One date style everywhere: "6 Nov 2026"; times "3:30 pm"; both: "6 Nov 2026, 3:30 pm".
+  const fmtDate = (iso) => new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: IST });
+  const fmtClock = (iso) => new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: IST });
+  const fmtTime = (iso) => iso ? fmtDate(iso) + ', ' + fmtClock(iso) : '';
   const fmtDay = (iso) => {
-    const d = new Date(iso + 'T00:00:00+05:30'); const today = new Date(new Date().toLocaleString('en-US', { timeZone: IST })); today.setHours(0, 0, 0, 0);
-    const diff = Math.round((today - new Date(d.toLocaleString('en-US', { timeZone: IST }))) / 864e5);
+    const d = new Date(iso + 'T12:00:00+05:30'); const todayIso = new Date().toLocaleDateString('en-CA', { timeZone: IST });
+    const diff = Math.round((new Date(todayIso + 'T12:00:00+05:30') - d) / 864e5);
     const wk = d.toLocaleDateString('en-IN', { weekday: 'long', timeZone: IST });
-    const full = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric', timeZone: IST });
-    return { day: d.toLocaleDateString('en-IN', { day: 'numeric', timeZone: IST }), mon: d.toLocaleDateString('en-IN', { month: 'short', timeZone: IST }) + ' ' + String(d.getFullYear()).slice(2),
-      label: diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : wk, full };
+    return { day: d.toLocaleDateString('en-IN', { day: 'numeric', timeZone: IST }), mon: d.toLocaleDateString('en-IN', { month: 'short', timeZone: IST }) + ' ' + d.toLocaleDateString('en-IN', { year: 'numeric', timeZone: IST }),
+      label: diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : wk };
   };
-  const fmtTime = (iso) => iso ? new Date(iso).toLocaleString('en-IN', { timeZone: IST, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
   const kindOf = (domain, name) => { const d = String(domain || '').toLowerCase();
     if (/facebook\.com|fb\.com/.test(d)) return { icon: 'facebook-logo', label: 'Facebook' }; if (/instagram\.com/.test(d)) return { icon: 'instagram-logo', label: 'Instagram' };
     if (/(^|\.)x\.com|twitter\.com/.test(d)) return { icon: 'x-logo', label: 'X (Twitter)' }; if (/youtube\.com|youtu\.be/.test(d)) return { icon: 'youtube-logo', label: 'YouTube' };
@@ -97,17 +99,17 @@
   function mountSearch(host, compact) {
     host.innerHTML = `<div class="search ${compact ? 'compact' : ''}"><label class="field"><span class="sr">Search members, parties or constituencies</span>${ic('magnifying-glass')}<input type="search" autocomplete="off" spellcheck="false" aria-label="Search members, parties or constituencies" role="combobox" aria-expanded="false"></label><div class="suggest" hidden role="listbox"></div></div>`;
     const input = $('input', host), box = $('.suggest', host); let items = [], idx = -1, tick = 0;
-    const close = () => { box.hidden = true; input.setAttribute('aria-expanded', 'false'); idx = -1; };
+    const root = $('.search', host); const close = () => { box.hidden = true; root.classList.remove('live'); input.setAttribute('aria-expanded', 'false'); idx = -1; };
     const go = (it) => { close(); input.value = ''; location.hash = it.href; };
     function render() {
       const s = suggestions(input.value); items = [];
       const mk = (cls, html, href) => { items.push({ href }); return `<button class="sg" role="option" data-i="${items.length - 1}">${html}</button>`; };
       let h = '';
-      if (s.members.length) { h += `<div class="sg-label">${s.trending ? 'In the news this week' : 'Members'}</div>` + s.members.map((m) => mk('', `${avatar(m, 's')}<span class="t"><div class="n">${esc(m.name_en)}${m.name_hi ? ` <span style="font-weight:400;color:var(--muted)">${esc(m.name_hi)}</span>` : ''}</div><div class="s">${esc(m.party || '')} · ${esc(seatOf(m))}${m.is_current === false ? ' · Former' : ''}</div></span><span class="go">${ic('caret-right')}</span>`, '#/m/' + m.id)).join(''); }
+      if (s.members.length) { h += `<div class="sg-label">${s.trending ? 'In the news this week' : 'Members'}</div>` + s.members.map((m) => mk('', `${avatar(m, 's')}<span class="t"><div class="n">${esc(m.name_en)}</div><div class="s">${esc(m.party || '')} · ${esc(seatOf(m))}${m.is_current === false ? ' · Former' : ''}</div></span><span class="go">${ic('caret-right')}</span>`, '#/m/' + m.id)).join(''); }
       if (s.parties.length) { h += '<div class="sg-label">Parties</div>' + s.parties.map((p) => mk('', `<span class="badge">${ic('flag')}</span><span class="t"><div class="n">${esc(p.name)}</div><div class="s">${p.n} sitting member${p.n === 1 ? '' : 's'}</div></span><span class="go">${ic('caret-right')}</span>`, '#/party/' + encodeURIComponent(p.name))).join(''); }
       if (s.seats.length) { h += '<div class="sg-label">Constituencies &amp; states</div>' + s.seats.map((p) => mk('', `<span class="badge">${ic('map-pin')}</span><span class="t"><div class="n">${esc(p.name)}</div><div class="s">${esc(p.sub)}</div></span><span class="go">${ic('caret-right')}</span>`, '#/' + p.kind + '/' + encodeURIComponent(p.name))).join(''); }
       if (!h) h = `<div class="empty" style="padding:20px">${ic('magnifying-glass')}<div>No member, party or constituency found for “${esc(input.value)}”.</div></div>`;
-      box.innerHTML = h; box.hidden = false; input.setAttribute('aria-expanded', 'true'); idx = -1;
+      const wasHidden = box.hidden; box.innerHTML = h; box.hidden = false; root.classList.add('live'); input.setAttribute('aria-expanded', 'true'); idx = -1; if (wasHidden) { box.style.animation = 'none'; void box.offsetWidth; box.style.animation = ''; }
     }
     const mark = () => box.querySelectorAll('.sg').forEach((b, i) => b.classList.toggle('on', i === idx));
     input.addEventListener('input', () => { clearTimeout(tick); tick = setTimeout(render, 60); });
@@ -127,13 +129,13 @@
   const view = $('#view'); const ic = window.ic;
   function setTitle(t) { document.title = t ? t + ' · NetaNazar' : 'NetaNazar · Know your MP'; }
   function memberRow(m) {
-    return `<a class="row" href="#/m/${m.id}">${avatar(m, 'm')}<span class="t"><div class="n">${esc(m.name_en)}${m.name_hi ? `<small>${esc(m.name_hi)}</small>` : ''}</div><div class="s">${esc(m.party || '')} · ${esc(seatOf(m))}${m.state && m.constituency ? ', ' + esc(m.state) : ''}</div></span><span class="st ${m.is_current === false ? 'off' : 'ok'}"><span class="dot"></span>${esc(roleOf(m))}</span></a>`;
+    return `<a class="row" href="#/m/${m.id}">${avatar(m, 'm')}<span class="t"><div class="n">${esc(m.name_en)}</div><div class="s">${esc(m.party || '')} · ${esc(seatOf(m))}${m.state && m.constituency ? ', ' + esc(m.state) : ''}</div></span><span class="st ${m.is_current === false ? 'off' : 'ok'}"><span class="dot"></span>${esc(roleOf(m))}</span></a>`;
   }
   function home() {
     setTitle(''); const cur = MEM.filter((m) => m.is_current !== false);
     const ls = cur.filter((m) => m.house === 'Lok Sabha').length, rs = cur.filter((m) => m.house === 'Rajya Sabha').length;
-    view.innerHTML = `<section class="hero"><div class="wrap"><h1>Know your <em>MP</em>.</h1><div id="heroSearch"></div>
-      ${cur.length ? `<div class="stats"><span>${ic('users')} <b class="tnum">${cur.length}</b> sitting members</span><span>${ic('bank')} <b class="tnum">${ls}</b> Lok Sabha</span><span>${ic('buildings')} <b class="tnum">${rs}</b> Rajya Sabha</span>${UPDATED ? `<span>${ic('clock')} Updated ${esc(new Date(UPDATED).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: IST }))}</span>` : ''}</div><div class="legend"><span><i class="k">${ic('check')}</i> Active</span><span><i class="k off">${ic('x')}</i> Former</span><span>Ring colour = party</span></div>` : ''}</div></section>
+    view.innerHTML = `<section class="hero"><div class="wrap"><h1><span>Know your</span><span class="mp" aria-label="MP"><b>M</b><b>P</b></span></h1><div id="heroSearch"></div>
+      ${cur.length ? `<div class="stats"><span>${ic('users')} <b class="tnum">${cur.length}</b> sitting members</span><span>${ic('bank')} <b class="tnum">${ls}</b> Lok Sabha</span><span>${ic('buildings')} <b class="tnum">${rs}</b> Rajya Sabha</span>${UPDATED ? `<span>${ic('clock')} Updated ${esc(fmtTime(UPDATED))}</span>` : ''}</div><div class="legend"><span><i class="k">${ic('check')}</i> Active</span><span><i class="k off">${ic('x')}</i> Former</span><span>Ring Colour = Party</span></div>` : ''}</div></section>
       <div class="wrap" id="homeBody"></div>`;
     const inp = mountSearch($('#heroSearch'), false); if (matchMedia('(min-width:700px)').matches) inp.focus({ preventScroll: true });
     const body = $('#homeBody');
@@ -167,18 +169,45 @@
     if (!m) { view.innerHTML = `<div class="wrap"><a class="back" href="#/">${ic('arrow-left')} Home</a><div class="empty">${ic('user')}<div>Member not found.</div></div></div>`; return; }
     setTitle(m.name_en); const role = roleOf(m); const ok = m.is_current !== false;
     view.innerHTML = `<div class="wrap"><a class="back" href="javascript:history.length>1?history.back():location.hash='#/'">${ic('arrow-left')} Back</a>
-      <section class="profile-head">${avatar(m, 'l')}<div><h1>${esc(m.name_en)}</h1>${m.name_hi ? `<div class="hi">${esc(m.name_hi)}</div>` : ''}
+      <section class="profile-head">${avatar(m, 'l')}<div><h1>${esc(m.name_en)}</h1>
         <div class="chips"><span class="chip ${ok ? 'ok' : 'off'}"><span class="dot"></span>${esc(role)}</span>${m.party ? `<a class="chip accent" href="#/party/${encodeURIComponent(m.party)}" style="text-decoration:none">${ic('flag')}${esc(m.party)}</a>` : ''}<span class="chip">${esc(m.house)}</span>${m.minister_position ? `<span class="chip sand">${ic('seal-check')}${esc(m.minister_position)}</span>` : ''}</div>
         <div class="facts">${m.constituency ? `<span>${ic('map-pin')} <b><a href="#/seat/${encodeURIComponent(m.constituency)}" style="color:inherit">${esc(m.constituency)}</a></b></span>` : ''}${m.state ? `<span><a href="#/state/${encodeURIComponent(m.state)}" style="color:inherit">${esc(m.state)}</a></span>` : ''}
-          ${m.lok_sabha_terms && m.lok_sabha_terms.length ? `<span>Lok Sabha <b class="tnum">${esc(m.lok_sabha_terms.join(', '))}</b> · ${m.terms_count} term${m.terms_count == 1 ? '' : 's'}</span>` : (m.terms_count ? `<span><b>${m.terms_count}</b> term${m.terms_count == 1 ? '' : 's'}</span>` : '')}
+          ${m.terms_count ? `<span><b class="tnum">${m.terms_count}</b> ${m.terms_count == 1 ? 'Term' : 'Terms'}</span>` : ''}
           ${m.term_label && m.house === 'Rajya Sabha' ? `<span>Term <b class="tnum">${esc(m.term_label)}</b></span>` : ''}${m.elected_current ? `<span>${ic('calendar-check')} <b>${esc(m.elected_current)}</b></span>` : ''}</div></div></section>
-      <div class="cols"><div><section class="card" id="newsCard"><h3>${ic('path')} In the news</h3><div class="skel" style="height:90px"></div></section></div>
-      <aside class="aside"><section class="card" id="attCard"><h3>${ic('chart-bar')} Attendance</h3><div class="skel" style="height:140px"></div></section><section class="card" id="posCard"><h3>${ic('clipboard-text')} Positions held</h3><div class="skel" style="height:90px"></div></section></aside></div></div>`;
+      <div class="cols"><div><section class="card" id="careerCard" hidden></section><section class="card" id="newsCard"><h3>${ic('path')} In the news</h3><div class="skel" style="height:90px"></div></section><section class="card" id="posCard"><h3>${ic('clipboard-text')} Positions held</h3><div class="skel" style="height:90px"></div></section></div>
+      <aside class="aside"><section class="card" id="attCard"><h3>${ic('chart-bar')} Attendance</h3><div class="skel" style="height:140px"></div></section></aside></div></div>`;
     mountSearchTop(); window.scrollTo(0, 0);
     const q = (p) => api(p).catch(() => null);
-    const [det, att, news] = await Promise.all([q('v_member_detail?select=positions_held,details_fetched_at&id=eq.' + id), q('v_attendance?select=session_no,session_period,sitting_days,signed_days,loksabha&order=session_no.asc&politician_id=eq.' + id), q('v_news_timeline?select=article_id,url,title,source_name,source_domain,day,at,status&order=at.desc&limit=600&politician_id=eq.' + id)]);
+    const [det, att, news] = await Promise.all([q('v_member_detail?select=positions_held,details_fetched_at,seat_history&id=eq.' + id), q('v_attendance?select=session_no,session_period,sitting_days,signed_days,loksabha&order=session_no.asc&politician_id=eq.' + id), q('v_news_timeline?select=article_id,url,title,source_name,source_domain,day,at,status&order=at.desc&limit=600&politician_id=eq.' + id)]);
     if (location.hash !== '#/m/' + id) return;
-    drawAttendance(m, att); drawPositions(det && det[0]); drawNews(news, id);
+    drawCareer(m, det && det[0]); drawAttendance(m, att); drawPositions(det && det[0]); drawNews(news, id);
+  }
+
+  // Lok Sabha career: one column per Lok Sabha, showing the seat (and party) of each term.
+  const LS_YEAR = { 1: 1952, 2: 1957, 3: 1962, 4: 1967, 5: 1971, 6: 1977, 7: 1980, 8: 1984, 9: 1989, 10: 1991, 11: 1996, 12: 1998, 13: 1999, 14: 2004, 15: 2009, 16: 2014, 17: 2019, 18: 2024 };
+  const ord = (n) => { const v = n % 100; return ['th', 'st', 'nd', 'rd'][(v - 20) % 10] || ['th', 'st', 'nd', 'rd'][v] || 'th'; };
+  const SEAT_COLORS = ['#3b3fb6', '#b4563c', '#17824a', '#9a3fa0', '#b26a00', '#0f7f9c', '#c2362b', '#5b6b2e'];
+  function drawCareer(m, d) {
+    const el = $('#careerCard'); if (!el) return; const terms = (m.lok_sabha_terms || []).slice().sort((a, b) => a - b);
+    if (m.house !== 'Lok Sabha' || !terms.length) { el.hidden = true; return; }
+    const hist = new Map(((d && d.seat_history) || []).map((e) => [e.ls, e])); const have = hist.size > 0;
+    const seatsInOrder = []; for (const n of terms) { const s = hist.get(n)?.seat; if (s && !seatsInOrder.includes(s)) seatsInOrder.push(s); }
+    const color = (s) => SEAT_COLORS[Math.max(0, seatsInOrder.indexOf(s)) % SEAT_COLORS.length];
+    let sum = '';
+    if (have && seatsInOrder.length) {
+      if (seatsInOrder.length === 1) sum = `Contested from <b>${esc(seatsInOrder[0])}</b> in ${terms.length === 1 ? 'the' : 'all ' + terms.length} term${terms.length === 1 ? '' : 's'} — never changed seat.`;
+      else { const cnt = seatsInOrder.map((s) => [s, terms.filter((n) => hist.get(n)?.seat === s).length]); sum = `Contested from <b>${seatsInOrder.length} different seats</b>: ${cnt.map(([s, c]) => `<b>${esc(s)}</b> (${c})`).join(', ')}.`; }
+      const parties = []; for (const n of terms) { const p = hist.get(n)?.party; if (p && parties[parties.length - 1] !== p) parties.push(p); }
+      if (parties.length > 1) sum += ` Party changed: ${parties.map(esc).join(' → ')}.`;
+    } else sum = 'Seat history will appear after the next data refresh.';
+    const first = terms[0], last = terms[terms.length - 1]; const cols = []; let prev = null;
+    for (let n = first; n <= last; n++) {
+      if (!terms.includes(n)) { cols.push(`<div class="trm gap dash"><div class="yr">${LS_YEAR[n] || ''}</div><div class="nd">${n}<sup>${ord(n)}</sup></div><div class="seat">Not an MP</div></div>`); prev = null; continue; }
+      const e = hist.get(n) || {}; const col = e.seat ? color(e.seat) : 'var(--muted)'; const same = prev && prev.seat === e.seat; const pc = prev && prev.party && e.party && prev.party !== e.party;
+      cols.push(`<div class="trm ${prev ? (same ? '' : 'dash') : ''}" style="--sc:${col};--lc:${same ? col : 'var(--line-2)'}"><div class="yr">${LS_YEAR[n] || ''}</div><div class="nd">${n}<sup>${ord(n)}</sup></div><div class="seat">${esc(e.seat || '—')}</div>${e.state ? `<div class="sub">${esc(e.state)}</div>` : ''}${e.party ? `<div class="pty ${pc ? 'pc' : ''}">${esc(e.party)}${pc ? ' · changed' : ''}</div>` : ''}</div>`);
+      prev = e;
+    }
+    el.hidden = false; el.innerHTML = `<h3>${ic('bank')} Lok Sabha Career</h3><p class="career-sum">${sum}</p><div class="career">${cols.join('')}</div>`;
   }
   function drawAttendance(m, att) {
     const el = $('#attCard'); if (!el) return;
@@ -208,7 +237,7 @@
     for (const [day, srcs] of days) {
       const f = fmtDay(day); const n = [...srcs.values()].reduce((a, s) => a + s.items.size, 0);
       h += `<div class="stone ${first ? 'open' : ''}" data-day="${esc(day)}"><button class="head" aria-expanded="${first}"><span class="d"><b class="tnum">${esc(f.day)}</b><span>${esc(f.mon)}</span></span><span class="w"><div class="a">${esc(f.label)}</div><div class="b">${n} stor${n == 1 ? 'y' : 'ies'} · ${srcs.size} source${srcs.size == 1 ? '' : 's'}</div></span><span class="car">${ic('caret-down')}</span></button>
-        <div class="flow" ${first ? '' : 'hidden'}>${[...srcs.values()].map((s) => { const k = kindOf(s.domain, s.name); return `<div class="src"><div class="sh"><span class="ico">${ic(k.icon)}</span>${esc(k.icon === 'globe' ? s.name : k.label)} <small>${s.items.size}</small></div><div class="arts">${[...s.items.values()].map((a) => `<div class="art"><button data-a="${esc(a.article_id)}"><div class="tt">${esc(a.title || a.url)}</div><div class="mm"><span>${esc(new Date(a.at).toLocaleTimeString('en-IN', { timeZone: IST, hour: 'numeric', minute: '2-digit' }))}</span>${a.status === 'deleted' ? '<span class="chip off">Removed</span>' : ''}</div></button></div>`).join('')}</div></div>`; }).join('')}</div></div>`;
+        <div class="flow" ${first ? '' : 'hidden'}>${[...srcs.values()].map((s) => { const k = kindOf(s.domain, s.name); return `<div class="src"><div class="sh"><span class="ico">${ic(k.icon)}</span>${esc(k.icon === 'globe' ? s.name : k.label)} <small>${s.items.size}</small></div><div class="arts">${[...s.items.values()].map((a) => `<div class="art"><button data-a="${esc(a.article_id)}"><div class="tt">${esc(a.title || a.url)}</div><div class="mm"><span>${esc(fmtClock(a.at))}</span>${a.status === 'deleted' ? '<span class="chip off">Removed</span>' : ''}</div></button></div>`).join('')}</div></div>`; }).join('')}</div></div>`;
       first = false;
     }
     h += '</div>' + (rows.length >= 600 ? '<div class="fine">Showing the most recent stories.</div>' : '');
@@ -223,7 +252,7 @@
   async function openStory(aid) {
     const r = TL.get(aid); if (!r) return; const k = kindOf(r.source_domain, r.source_name); const scrim = $('#scrim'), sh = $('#sheet');
     const head = `<div class="top"><span class="chip accent">${ic(k.icon)}${esc(k.icon === 'globe' ? (r.source_name || r.source_domain) : k.label)}</span>${r.status === 'deleted' ? '<span class="chip off">Removed by publisher</span>' : ''}<button class="iconbtn x" id="sx" aria-label="Close">${ic('x')}</button></div>
-      <h2>${esc(r.title || r.url)}</h2><div class="meta"><span>${ic('calendar-blank')} ${esc(fmtTime(r.at))} IST</span>${r.source_domain ? `<span>${ic('link')} ${esc(r.source_domain)}</span>` : ''}</div>`;
+      <h2>${esc(r.title || r.url)}</h2><div class="meta"><span>${ic('calendar-blank')} ${esc(fmtTime(r.at))}</span>${r.source_domain ? `<span>${ic('link')} ${esc(r.source_domain)}</span>` : ''}</div>`;
     sh.innerHTML = head + `<h3 style="font:600 12px var(--f-ui);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:20px 0 6px">What changed</h3><div id="hist"><div class="skel" style="height:56px"></div></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px"><a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">Open original ${ic('arrow-up-right')}</a><button class="btn ghost" id="cp">${ic('copy')} Copy link</button></div>
       <div class="fine">We keep headlines and a summary of edits only. The full story stays on the publisher’s site, which also doesn’t allow being opened inside other pages.</div>`;

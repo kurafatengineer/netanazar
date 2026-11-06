@@ -138,6 +138,32 @@ async function officialDetails(house: string, limit: number, onlyStale: boolean,
   return { house, total: everyone.length, offset, done, failed, new_positions: newPositions, next_offset: next, remaining, finished: remaining === 0 || slice.length === 0 };
 }
 
+// Seat and party in every Lok Sabha term a current member served in (one request per past Lok Sabha).
+async function officialSeats() {
+  const pols = (await all('politicians', 'id,official_id,lok_sabha_terms,party,constituency,state')).filter((p) => String(p.official_id ?? '').startsWith('LS:'));
+  if (!pols.length) throw new Error('Load the Lok Sabha member list first');
+  const terms = new Set<number>(); for (const p of pols) for (const n of p.lok_sabha_terms ?? []) terms.add(n);
+  const need = [...terms].filter((n) => n !== 18 && n > 0).sort((a, b) => a - b);
+  const hist = new Map<string, any[]>(); let lists = 0;
+  for (const n of need) {
+    await sleep(1200);
+    let d: any; try { d = await getJson(`https://sansad.in/api_ls/member?loksabha=${n}&locale=en&page=1&size=800`); } catch { continue; }
+    lists++;
+    for (const m of d.membersDtoList ?? []) { const k = String(m.mpsno); if (!hist.has(k)) hist.set(k, []); hist.get(k)!.push({ ls: n, seat: tidy(m.constName), state: tidy(m.stateName), party: tidy(m.partySname) }); }
+  }
+  let updated = 0;
+  for (let i = 0; i < pols.length; i += 20) {
+    await Promise.all(pols.slice(i, i + 20).map(async (p) => {
+      const mine = new Set<number>(p.lok_sabha_terms ?? []); const byLs = new Map<number, any>();
+      for (const e of hist.get(String(p.official_id).slice(3)) ?? []) if (mine.has(e.ls)) byLs.set(e.ls, e);
+      if (mine.has(18)) byLs.set(18, { ls: 18, seat: p.constituency ?? '', state: p.state ?? '', party: p.party ?? '' });
+      const list = [...byLs.values()].sort((a, b) => a.ls - b.ls);
+      await db.from('politicians').update({ seat_history: list }).eq('id', p.id); updated++;
+    }));
+  }
+  return { lok_sabhas_read: lists, members: updated };
+}
+
 async function importOfficial(house: string, rows: any[], markStale: boolean) {
   const existing = (await all('politicians', 'id,name_en,name_hi,name_variants,house,constituency,state,source,is_current,official_id')).filter((p) => p.house === house);
   const exact = new Map<string, any>(), loose = new Map<string, any>(), seat = new Map<string, any[]>(), byId = new Map<string, any>();
@@ -241,6 +267,7 @@ Deno.serve(async (req) => {
       return json({ source: 'sansad.in', ...(await importOfficial(body.house, rows, body.mark_stale !== false)) });
     }
     if (body.action === 'official_attendance') return json(await officialAttendance());
+    if (body.action === 'official_seats') return json(await officialSeats());
     if (body.action === 'official_details') {
       if (!['Lok Sabha', 'Rajya Sabha'].includes(body.house)) return json({ error: 'house must be Lok Sabha or Rajya Sabha' }, 400);
       return json(await officialDetails(body.house, Math.min(+body.limit || 40, 60), !!body.only_stale, Math.max(0, +body.offset || 0)));

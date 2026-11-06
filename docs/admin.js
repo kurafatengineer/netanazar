@@ -34,11 +34,11 @@
   const chip = (cls, html) => { const c = $('#tokChip'); c.className = 'chip ' + cls; c.innerHTML = html; };
   async function verify() {
     if (!saved) { chip('', 'Not set'); $('#go').disabled = true; return false; }
-    chip('warn', '<span class="sp"></span> Checking…');
-    try { await api('registry', 'GET', '?action=ping'); chip('ok', ic('check-circle') + ' Connected'); $('#go').disabled = false; refresh(); return true; }
-    catch (e) { chip('off', ic('x-circle') + ' ' + esc(e.message)); $('#go').disabled = true; return false; }
+    $('#tok').classList.remove('ok'); chip('warn', '<span class="sp"></span> Checking…');
+    try { await api('registry', 'GET', '?action=ping'); chip('ok', ic('check-circle') + ' Connected'); $('#tok').classList.add('ok'); $('#go').disabled = false; refresh(); return true; }
+    catch (e) { chip('off', ic('x-circle') + ' ' + esc(e.message)); $('#tok').classList.remove('ok'); $('#go').disabled = true; return false; }
   }
-  $('#tok').addEventListener('input', () => { const d = $('#tok').value.trim() !== saved && $('#tok').value.trim(); $('#tokSave').style.display = d ? '' : 'none'; if (d) chip('warn', 'Not saved yet'); });
+  $('#tok').addEventListener('input', () => { const d = $('#tok').value.trim() !== saved && $('#tok').value.trim(); $('#tokSave').style.display = d ? '' : 'none'; if (d) { $('#tok').classList.remove('ok'); chip('warn', 'Not saved yet'); } });
   $('#tokSave').onclick = () => { saved = $('#tok').value.trim(); ss('nn_tok', saved); ss('nn_base', $('#base').value.trim()); $('#tokSave').style.display = 'none'; verify(); };
   $('#base').addEventListener('change', () => { ss('nn_base', $('#base').value.trim()); verify(); });
 
@@ -67,6 +67,9 @@
       const r = await retry(() => api('registry', 'POST', '', { action: 'official_fetch', house, mark_stale: true }));
       added += r.inserted; former += r.marked_former; total += r.official_rows; log(`${house}: ${r.official_rows} members · ${r.matched} matched · ${r.inserted} new · ${r.marked_former} marked former`);
     }
+    if (STOP) return 'stopped';
+    setStage('members', 'run', 'Reading seats and parties of past Lok Sabha terms…', 92);
+    try { const r = await retry(() => api('registry', 'POST', '', { action: 'official_seats' })); log(`Seat history: ${r.lok_sabhas_read} past Lok Sabhas, ${r.members} members`); } catch (e) { log('Seat history skipped: ' + e.message); }
     setStage('members', 'ok', `${total} sitting members updated · ${added} new · ${former} marked former`, 100);
   }
   async function stageAttendance() {
@@ -133,7 +136,7 @@
   let running = false;
   async function runAll() {
     if (running) return; running = true; STOP = false; $('#msg').className = 'msgbar';
-    const go = $('#go'); go.disabled = true; go.innerHTML = '<span class="sp"></span> Updating…'; $('#stop').style.display = ''; $('#stop').innerHTML = STOP_LABEL;
+    const go = $('#go'); go.disabled = true; go.classList.add('busy'); go.setAttribute('aria-label', 'Updating'); go.innerHTML = '<span class="sp"></span>'; $('#stop').style.display = ''; $('#stop').innerHTML = STOP_LABEL;
     drawStages(); const picked = STAGES.filter((s) => $('#ck-' + s.id).checked); const failed = [];
     STAGES.forEach((s) => { if (!picked.includes(s)) setStage(s.id, 'skip', 'Skipped'); });
     // keep the user's checkboxes after redraw
@@ -149,9 +152,9 @@
     if (STOP) banner('info', ic('stop') + ' Stopped. Whatever finished is saved; run again any time to continue.');
     else if (failed.length) banner('bad', ic('warning') + ' Finished with problems in: <b>' + esc(failed.join(', ')) + '</b>. Run again to retry just what is missing.');
     else banner('ok', ic('check-circle') + ` All done in about ${mins} min. The public site now shows the latest data.`);
-    STAGES.forEach((s) => { $('#ck-' + s.id).disabled = false; }); go.disabled = false; go.innerHTML = GO_LABEL; $('#stop').style.display = 'none'; running = false; refresh();
+    STAGES.forEach((s) => { $('#ck-' + s.id).disabled = false; }); go.disabled = false; go.classList.remove('busy'); go.removeAttribute('aria-label'); go.innerHTML = GO_LABEL; $('#stop').style.display = 'none'; running = false; refresh();
   }
-  $('#go').onclick = runAll; $('#stop').onclick = () => { STOP = true; $('#stop').innerHTML = '<span class="sp"></span> Stopping…'; };
+  $('#go').onclick = runAll; $('#stop').onclick = () => { STOP = true; $('#stop').innerHTML = '<span class="sp"></span>'; };
 
   // ---------------- overview & sources ----------------
   const ago = (iso) => { if (!iso) return 'never'; const m = Math.round((Date.now() - new Date(iso)) / 6e4); return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m / 60) + ' h ago' : Math.round(m / 1440) + ' d ago'; };
@@ -160,7 +163,7 @@
       const [st, ov, src] = await Promise.all([api('registry', 'GET', '?action=status'), api('news', 'GET', '?action=overview'), api('news', 'GET', '?action=sources')]);
       $('#last').textContent = `Members ${ago(st.members_updated_at)} · attendance ${ago(st.attendance_updated_at)}`;
       const S = (n, l) => `<div class="stat"><b class="tnum">${Number(n).toLocaleString('en-IN')}</b><span>${l}</span></div>`;
-      $('#stats').innerHTML = S(st.lok_sabha, 'Lok Sabha members') + S(st.rajya_sabha, 'Rajya Sabha members') + S(st.with_positions, 'with positions loaded') + S(st.attendance_rows, 'attendance records') + S(ov.articles.relevant, 'stories about members') + S(ov.mentions, 'member mentions') + S(ov.articles.irrelevant, 'skipped (no member named)') + S(ov.versions, 'story versions saved');
+      $('#stats').innerHTML = S(st.lok_sabha, 'Lok Sabha members') + S(st.rajya_sabha, 'Rajya Sabha members') + S(st.with_positions, 'With positions loaded') + S(st.attendance_rows, 'Attendance records') + S(ov.articles.relevant, 'Stories about members') + S(ov.mentions, 'Member mentions') + S(ov.articles.irrelevant, 'Skipped (no member named)') + S(ov.versions, 'Story versions saved');
       $('#srcTbl').innerHTML = src.rows.map((r) => `<tr><td><b>${esc(r.name || r.domain)}</b><div class="fine" style="margin:0">${esc((r.rss_urls || [])[0] || 'no feed saved')}</div></td><td style="text-align:right;white-space:nowrap">${r.is_blocked ? `<span class="chip off">Blocked</span> <button class="mini" data-unblock="${esc(r.id)}">Try again</button>` : '<span class="chip ok">Active</span>'}</td></tr>`).join('') || '<tr><td>No sources yet.</td></tr>';
     } catch (e) { $('#stats').innerHTML = `<div class="note" style="grid-column:1/-1">${esc(e.message)}</div>`; }
   }
